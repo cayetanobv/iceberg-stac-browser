@@ -122,25 +122,18 @@
       <div class="d-flex gap-2 flex-wrap align-items-center">
         <button class="btn btn-primary btn-sm" @click="downloadFullGeoParquet" :disabled="fullDownloading">
           <span v-if="fullDownloading" class="spinner-border spinner-border-sm me-1" />
-          Download GeoParquet (latest snapshot)
+          Full table (GeoParquet)
         </button>
         <button class="btn btn-outline-primary btn-sm" @click="downloadQueryResult" :disabled="queryDownloading || !queryData" v-if="queryData">
           <span v-if="queryDownloading" class="spinner-border spinner-border-sm me-1" />
-          Download query result (.parquet)
+          Query result (GeoParquet)
         </button>
+        <button class="btn btn-outline-secondary btn-sm" @click="exportCSV" v-if="queryData || previewData">CSV</button>
+        <button class="btn btn-outline-secondary btn-sm" @click="exportGeoJSON" v-if="(queryData || previewData) && hasGeometry">GeoJSON</button>
       </div>
       <div v-if="rowCount" class="text-muted mt-1">Full table: {{ rowCount.toLocaleString() }} rows. Large tables may take a while.</div>
       <div v-if="downloadError" class="text-danger mt-2">{{ downloadError }}</div>
       <div v-if="downloadProgress" class="text-muted mt-1">{{ downloadProgress }}</div>
-    </section>
-
-    <!-- Export query results -->
-    <section class="export-panel mb-4" v-if="queryData || previewData">
-      <h3>Export</h3>
-      <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary btn-sm" @click="exportCSV">Export CSV</button>
-        <button class="btn btn-outline-secondary btn-sm" @click="exportGeoJSON" v-if="hasGeometry">Export GeoJSON</button>
-      </div>
     </section>
   </div>
 </template>
