@@ -128,8 +128,6 @@
           <span v-if="queryDownloading" class="spinner-border spinner-border-sm me-1" />
           Query result (GeoParquet)
         </button>
-        <button class="btn btn-outline-secondary btn-sm" @click="exportCSV" v-if="queryData || previewData">CSV</button>
-        <button class="btn btn-outline-secondary btn-sm" @click="exportGeoJSON" v-if="(queryData || previewData) && hasGeometry">GeoJSON</button>
       </div>
       <div v-if="rowCount" class="text-muted mt-1">Full table: {{ rowCount.toLocaleString() }} rows. Large tables may take a while.</div>
       <div v-if="downloadError" class="text-danger mt-2">{{ downloadError }}</div>
@@ -233,9 +231,6 @@ export default defineComponent({
       const primaryGeom = this.stacData['table:primary_geometry'];
       if (primaryGeom) return true;
       return this.tableColumns.some(c => c.name === 'geometry' || c.type === 'geometry' || c.type === 'binary');
-    },
-    activeData() {
-      return this.queryData || this.previewData;
     }
   },
   watch: {
@@ -483,47 +478,6 @@ export default defineComponent({
         return 'Access denied — token may be expired. Paste a new token and reconnect.';
       }
       return msg;
-    },
-    exportCSV() {
-      const data = this.activeData;
-      if (!data) return;
-      const header = data.columns.join(',');
-      const rows = data.rows.map(r =>
-        data.columns.map(c => {
-          const v = r[c];
-          if (v === null || v === undefined) return '';
-          const s = String(v);
-          return s.includes(',') || s.includes('"') || s.includes('\n')
-            ? `"${s.replace(/"/g, '""')}"`
-            : s;
-        }).join(',')
-      );
-      this.downloadFile(`${header}\n${rows.join('\n')}`, 'results.csv', 'text/csv');
-    },
-    exportGeoJSON() {
-      // Placeholder — requires geometry column in results
-      const data = this.activeData;
-      if (!data) return;
-      const features = data.rows
-        .filter(r => r.geojson || r.geometry)
-        .map(r => {
-          const geom = r.geojson ? JSON.parse(r.geojson) : null;
-          const props = { ...r };
-          delete props.geojson;
-          delete props.geometry;
-          return { type: 'Feature', geometry: geom, properties: props };
-        });
-      const fc = { type: 'FeatureCollection', features };
-      this.downloadFile(JSON.stringify(fc, null, 2), 'results.geojson', 'application/geo+json');
-    },
-    downloadFile(content, filename, mime) {
-      const blob = new Blob([content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
     }
   }
 });
