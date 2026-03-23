@@ -30,7 +30,7 @@ DuckDB-WASM cannot use `gs://` or `s3://` protocols directly — URLs are conver
 ## What changed vs upstream STAC Browser
 
 | Area | Change | Size |
-|------|--------|------|
+| --- | --- | --- |
 | New component | `src/components/IcebergExplorer.vue` | ~490 lines |
 | New component | `src/components/IcebergResultsTable.vue` | ~130 lines |
 | New module | `src/duckdb.js` (DuckDB-WASM init + query) | ~180 lines |
