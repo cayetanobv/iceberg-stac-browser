@@ -1,0 +1,2 @@
+import{a2 as a,o as r,a as n,b as o,t as s,i}from"./index-D2VA4oRO.js";import"./utils-BBJ8PHg9.js";import"./_commonjsHelpers-CE1G-McA.js";import"./I18N-DlIXJTel.js";const c={name:"CustomText",props:{title:{type:String,default:""},text:{type:String,default:""}}},l={class:"custom-text"};function p(d,t,e,m,u,_){return r(),n("div",l,[o("h3",null,s(e.title),1),t[0]||(t[0]=i()),o("p",null,s(e.text),1)])}const B=a(c,[["render",p],["__scopeId","data-v-59f2184c"]]);export{B as default};
+//# sourceMappingURL=CustomText-DeDitPJF.js.map

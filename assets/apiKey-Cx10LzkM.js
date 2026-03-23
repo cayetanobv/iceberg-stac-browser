@@ -1,0 +1,2 @@
+import{aq as r,ar as u}from"./index-D2VA4oRO.js";import"./utils-BBJ8PHg9.js";import"./_commonjsHelpers-CE1G-McA.js";import"./I18N-DlIXJTel.js";class l extends r{constructor(t,e,o){super(t,e,o)}getButtonTitle(){return u.global.t("authentication.button.title")}getComponent(){return"ApiKey"}getComponentProps(){return{description:this.options.description}}async logout(){return this.router.currentRoute.value.name!=="logout"&&this.router.push("/auth/logout"),!0}updateStore(t){return this._updateStore(t)}}export{l as default};
+//# sourceMappingURL=apiKey-Cx10LzkM.js.map

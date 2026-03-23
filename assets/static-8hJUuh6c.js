@@ -1,0 +1,2 @@
+import{d as l}from"./Image-CUFz0Zy0.js";import{m as u,n as a}from"./contains-y9KzPzWu.js";import"./math-CpLPzBb1.js";function x(t){const s=t.load||l,r=t.imageExtent,c=t.crossOrigin??null;return()=>{const n=new Image;return n.crossOrigin=c,s(n,t.url).then(e=>{const i=u(r)/e.width,o=a(r)/e.height;return{image:e,extent:r,resolution:i!==o?[i,o]:o,pixelRatio:1}})}}export{x as createLoader};
+//# sourceMappingURL=static-8hJUuh6c.js.map
