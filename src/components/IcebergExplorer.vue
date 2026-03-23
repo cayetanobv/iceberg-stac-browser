@@ -29,32 +29,39 @@
       <p v-else class="text-muted">No schema information available in collection metadata.</p>
     </section>
 
-    <!-- Auth Panel -->
+    <!-- Auth Panel (optional, for private buckets) -->
     <section class="auth-panel mb-4">
-      <h3>Connect</h3>
-      <div class="d-flex align-items-end gap-2 flex-wrap">
-        <div class="flex-grow-1">
-          <label class="form-label" for="iceberg-token">GCS / S3 Bearer Token</label>
-          <input
-            id="iceberg-token"
-            v-model="token"
-            type="password"
-            class="form-control"
-            placeholder="Paste access token..."
-            @keyup.enter="connect"
-          />
+      <details>
+        <summary class="mb-2" style="cursor: pointer;">
+          <strong>Authentication</strong>
+          <span class="text-muted ms-2">(only needed for private buckets)</span>
+        </summary>
+        <div class="d-flex align-items-end gap-2 flex-wrap mt-2">
+          <div class="flex-grow-1">
+            <label class="form-label" for="iceberg-token">GCS / S3 Bearer Token</label>
+            <input
+              id="iceberg-token"
+              v-model="token"
+              type="password"
+              class="form-control"
+              placeholder="Paste access token..."
+              @keyup.enter="applyToken"
+            />
+          </div>
+          <button class="btn btn-primary" @click="applyToken" :disabled="!token">
+            Apply Token
+          </button>
         </div>
-        <button class="btn btn-primary" @click="connect" :disabled="connecting || !token">
-          <span v-if="connecting" class="spinner-border spinner-border-sm me-1" />
-          {{ connected ? 'Reconnect' : 'Connect' }}
-        </button>
-      </div>
-      <div v-if="connected" class="text-success mt-2">Connected</div>
-      <div v-if="authError" class="text-danger mt-2">{{ authError }}</div>
+        <div v-if="tokenApplied" class="text-success mt-2">Token applied</div>
+        <div v-if="authError" class="text-danger mt-2">{{ authError }}</div>
+      </details>
     </section>
 
+    <!-- DuckDB init error -->
+    <div v-if="initError" class="text-danger mb-3">Failed to initialize DuckDB: {{ initError }}</div>
+
     <!-- Data Preview -->
-    <section class="preview-panel mb-4" v-if="connected">
+    <section class="preview-panel mb-4" v-if="ready">
       <h3>Data Preview</h3>
       <button class="btn btn-outline-primary btn-sm mb-2" @click="loadPreview" :disabled="previewLoading">
         <span v-if="previewLoading" class="spinner-border spinner-border-sm me-1" />
@@ -65,7 +72,7 @@
     </section>
 
     <!-- SQL Editor -->
-    <section class="sql-panel mb-4" v-if="connected">
+    <section class="sql-panel mb-4" v-if="ready">
       <h3>SQL Query</h3>
       <div class="mb-2">
         <textarea
@@ -87,7 +94,7 @@
     </section>
 
     <!-- Snapshots -->
-    <section class="snapshots-panel mb-4" v-if="connected">
+    <section class="snapshots-panel mb-4" v-if="ready">
       <h3>Snapshots</h3>
       <button class="btn btn-outline-primary btn-sm mb-2" @click="loadSnapshots" :disabled="snapshotsLoading">
         <span v-if="snapshotsLoading" class="spinner-border spinner-border-sm me-1" />
@@ -95,6 +102,18 @@
       </button>
       <ResultsTable v-if="snapshotsData" :data="snapshotsData" />
       <div v-if="snapshotsError" class="text-danger mt-2">{{ snapshotsError }}</div>
+    </section>
+
+    <!-- Map Preview -->
+    <section class="map-panel mb-4" v-if="ready && hasGeometry">
+      <h3>Geometry Preview</h3>
+      <button class="btn btn-outline-primary btn-sm mb-2" @click="loadMapPreview" :disabled="mapLoading">
+        <span v-if="mapLoading" class="spinner-border spinner-border-sm me-1" />
+        {{ mapLoaded ? 'Reload geometries' : 'Load sample geometries (500)' }}
+      </button>
+      <div v-if="mapError" class="text-danger mt-2">{{ mapError }}</div>
+      <div v-if="mapLoaded" class="map-container mt-2" ref="mapContainer"></div>
+      <div v-if="mapFeatureCount" class="text-muted mt-1">{{ mapFeatureCount }} features rendered</div>
     </section>
 
     <!-- Export -->
@@ -130,9 +149,10 @@ export default defineComponent({
   data() {
     return {
       token: sessionStorage.getItem('iceberg_token') || '',
-      connecting: false,
-      connected: false,
+      tokenApplied: false,
       authError: null,
+      ready: false,
+      initError: null,
       previewLoading: false,
       previewData: null,
       previewError: null,
@@ -142,18 +162,29 @@ export default defineComponent({
       queryError: null,
       snapshotsLoading: false,
       snapshotsData: null,
-      snapshotsError: null
+      snapshotsError: null,
+      icebergVersion: null,
+      mapLoading: false,
+      mapLoaded: false,
+      mapError: null,
+      mapFeatureCount: null,
+      olMap: null
     };
   },
   computed: {
     icebergHref() {
       return this.asset?.href || '';
     },
-    extraFields() {
-      return this.collection?.extra_fields || this.collection?.properties || {};
+    stacData() {
+      // STAC Browser stores the raw STAC JSON on the data object.
+      // Extension fields like table:columns are top-level properties.
+      const d = this.collection;
+      if (!d) return {};
+      // Try direct access (raw JSON), then .properties, then .summaries
+      return d;
     },
     tableColumns() {
-      const cols = this.extraFields['table:columns'];
+      const cols = this.stacData['table:columns'];
       if (!Array.isArray(cols)) return [];
       return cols;
     },
@@ -161,20 +192,31 @@ export default defineComponent({
       return this.tableColumns.length || null;
     },
     rowCount() {
-      return this.extraFields['table:row_count'] || null;
+      return this.stacData['table:row_count'] || null;
     },
     partitionInfo() {
-      const spec = this.extraFields['iceberg:partition_spec'];
+      const spec = this.stacData['iceberg:partition_spec'];
       if (!Array.isArray(spec) || spec.length === 0) return null;
       const parts = spec.map(p => `${p.field} (${p.transform})`).join(', ');
       return `Partitioned by: ${parts}`;
     },
+    httpHref() {
+      const href = this.icebergHref;
+      if (href.startsWith('gs://')) return href.replace('gs://', 'https://storage.googleapis.com/');
+      if (href.startsWith('s3://')) return href.replace(/^s3:\/\/([^/]+)/, 'https://$1.s3.amazonaws.com');
+      return href;
+    },
     defaultSQL() {
-      if (!this.icebergHref) return '';
-      return `SELECT *\nFROM iceberg_scan('${this.icebergHref}', allow_moved_paths := true)\nLIMIT 100`;
+      if (!this.httpHref) return '';
+      if (this.icebergVersion) {
+        return `SELECT *\nFROM iceberg_scan('${this.httpHref}', allow_moved_paths := true, version_name_format := '%s%s.metadata.json', version := '${this.icebergVersion}')\nLIMIT 100`;
+      }
+      return `SELECT *\nFROM iceberg_scan('${this.httpHref}', allow_moved_paths := true)\nLIMIT 100`;
     },
     hasGeometry() {
-      return this.tableColumns.some(c => c.name === 'geometry' || c.type === 'geometry');
+      const primaryGeom = this.stacData['table:primary_geometry'];
+      if (primaryGeom) return true;
+      return this.tableColumns.some(c => c.name === 'geometry' || c.type === 'geometry' || c.type === 'binary');
     },
     activeData() {
       return this.queryData || this.previewData;
@@ -188,22 +230,43 @@ export default defineComponent({
       }
     }
   },
+  async mounted() {
+    try {
+      const { initDuckDB, setGCSToken, resolveIcebergVersion } = await import('../duckdb.js');
+      await initDuckDB();
+      // Re-apply saved token if present
+      const saved = sessionStorage.getItem('iceberg_token');
+      if (saved) {
+        await setGCSToken(saved);
+        this.tokenApplied = true;
+      }
+      // Debug: log collection data to verify extension fields
+      console.log('[iceberg] collection keys:', Object.keys(this.collection || {}));
+      console.log('[iceberg] table:columns:', this.collection?.['table:columns']);
+      console.log('[iceberg] table:primary_geometry:', this.collection?.['table:primary_geometry']);
+      console.log('[iceberg] hasGeometry:', this.hasGeometry);
+      // Resolve latest metadata version via cloud storage API
+      if (this.icebergHref) {
+        this.icebergVersion = await resolveIcebergVersion(this.icebergHref);
+        console.log(`[iceberg] Resolved version: ${this.icebergVersion}`);
+        this.sqlText = this.defaultSQL;
+      }
+      this.ready = true;
+    } catch (err) {
+      this.initError = err.message;
+    }
+  },
   methods: {
-    async connect() {
-      this.connecting = true;
+    async applyToken() {
       this.authError = null;
+      this.tokenApplied = false;
       try {
-        const { initDuckDB, setGCSToken } = await import('../duckdb.js');
-        await initDuckDB();
-        if (this.token) {
-          await setGCSToken(this.token);
-          sessionStorage.setItem('iceberg_token', this.token);
-        }
-        this.connected = true;
+        const { setGCSToken } = await import('../duckdb.js');
+        await setGCSToken(this.token);
+        sessionStorage.setItem('iceberg_token', this.token);
+        this.tokenApplied = true;
       } catch (err) {
-        this.authError = `Connection failed: ${err.message}`;
-      } finally {
-        this.connecting = false;
+        this.authError = `Failed to apply token: ${err.message}`;
       }
     },
     async loadPreview() {
@@ -211,7 +274,7 @@ export default defineComponent({
       this.previewError = null;
       try {
         const { previewTable } = await import('../duckdb.js');
-        this.previewData = await previewTable(this.icebergHref);
+        this.previewData = await previewTable(this.icebergHref, this.icebergVersion);
       } catch (err) {
         this.previewError = this.formatError(err);
       } finally {
@@ -235,11 +298,102 @@ export default defineComponent({
       this.snapshotsError = null;
       try {
         const { getSnapshots } = await import('../duckdb.js');
-        this.snapshotsData = await getSnapshots(this.icebergHref);
+        this.snapshotsData = await getSnapshots(this.icebergHref, this.icebergVersion);
       } catch (err) {
         this.snapshotsError = this.formatError(err);
       } finally {
         this.snapshotsLoading = false;
+      }
+    },
+    async loadMapPreview() {
+      this.mapLoading = true;
+      this.mapError = null;
+      try {
+        const { sampleGeometries } = await import('../duckdb.js');
+        const result = await sampleGeometries(this.icebergHref, this.icebergVersion);
+
+        // Build GeoJSON FeatureCollection
+        const features = result.rows
+          .filter(r => r.geojson)
+          .map((r, i) => ({
+            type: 'Feature',
+            geometry: JSON.parse(r.geojson),
+            properties: { id: i }
+          }));
+        const fc = { type: 'FeatureCollection', features };
+        this.mapFeatureCount = features.length;
+
+        // Render with OpenLayers
+        await this.$nextTick();
+        this.mapLoaded = true;
+        await this.$nextTick();
+        this.renderMap(fc);
+      } catch (err) {
+        this.mapError = this.formatError(err);
+      } finally {
+        this.mapLoading = false;
+      }
+    },
+    async renderMap(geojson) {
+      const [
+        { default: Map },
+        { default: View },
+        { default: TileLayer },
+        { default: VectorLayer },
+        { default: VectorSource },
+        { default: OSM },
+        { default: GeoJSON },
+        { Fill, Stroke, Style, Circle: CircleStyle }
+      ] = await Promise.all([
+        import('ol/Map.js'),
+        import('ol/View.js'),
+        import('ol/layer/Tile.js'),
+        import('ol/layer/Vector.js'),
+        import('ol/source/Vector.js'),
+        import('ol/source/OSM.js'),
+        import('ol/format/GeoJSON.js'),
+        import('ol/style.js')
+      ]);
+
+      if (this.olMap) {
+        this.olMap.setTarget(null);
+        this.olMap = null;
+      }
+
+      const vectorSource = new VectorSource({
+        features: new GeoJSON().readFeatures(geojson, {
+          featureProjection: 'EPSG:3857'
+        })
+      });
+
+      const vectorLayer = new VectorLayer({
+        source: vectorSource,
+        style: new Style({
+          fill: new Fill({ color: 'rgba(0, 119, 182, 0.2)' }),
+          stroke: new Stroke({ color: '#0077b6', width: 1.5 }),
+          image: new CircleStyle({
+            radius: 5,
+            fill: new Fill({ color: '#0077b6' }),
+            stroke: new Stroke({ color: '#fff', width: 1 })
+          })
+        })
+      });
+
+      this.olMap = new Map({
+        target: this.$refs.mapContainer,
+        layers: [
+          new TileLayer({ source: new OSM() }),
+          vectorLayer
+        ],
+        view: new View({
+          center: [0, 0],
+          zoom: 2
+        })
+      });
+
+      const extent = vectorSource.getExtent();
+      if (extent && isFinite(extent[0])) {
+        this.olMap.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16 });
       }
     },
     resetSQL() {
@@ -299,6 +453,10 @@ export default defineComponent({
 });
 </script>
 
+<style lang="scss">
+@import "ol/ol.css";
+</style>
+
 <style lang="scss" scoped>
 .iceberg-explorer {
   padding: 1rem 0;
@@ -319,5 +477,12 @@ export default defineComponent({
 
 .badge {
   font-weight: 500;
+}
+
+.map-container {
+  width: 100%;
+  height: 400px;
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
 }
 </style>

@@ -33,7 +33,7 @@
               <b-tab v-if="hasThumbnails" :id="tabIds.thumbnails" :title="$t('thumbnails')" no-body>
                 <Thumbnails :thumbnails="thumbnails" />
               </b-tab>
-              <b-tab v-if="hasIcebergAsset" :id="tabIds.iceberg" title="Data Explorer">
+              <b-tab v-if="hasIcebergAsset" :id="tabIds.iceberg" title="Data Explorer" lazy>
                 <IcebergExplorer :asset="icebergAsset" :collection="data" />
               </b-tab>
             </b-tabs>

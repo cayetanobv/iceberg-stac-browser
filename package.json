@@ -47,7 +47,7 @@
   "license": "ISC",
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^15.2.2",
-    "@duckdb/duckdb-wasm": "^1.33.1-dev20.0",
+    "@duckdb/duckdb-wasm": "^1.33.1-dev38.0",
     "@musement/iso-duration": "^1.0.0",
     "@radiantearth/stac-fields": "~1.5.7",
     "@radiantearth/stac-migrate": "~2.0.2",
