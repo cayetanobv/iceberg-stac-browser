@@ -160,6 +160,21 @@ export async function sampleGeometries(href, version, limit = 500) {
   `);
 }
 
+/**
+ * Export a full Iceberg table or a SQL query result as Parquet bytes.
+ * Uses DuckDB's COPY ... TO with the opfs filesystem for in-memory export.
+ */
+export async function exportToParquet(sql) {
+  const c = await initDuckDB();
+  const filename = `export_${Date.now()}.parquet`;
+  await c.query(`COPY (${sql}) TO '${filename}' (FORMAT PARQUET);`);
+  const buffer = await db.copyFileToBuffer(filename);
+  await c.query(`DROP TABLE IF EXISTS __export_cleanup;`);
+  // Clean up the file
+  try { await db.dropFile(filename); } catch { /* ignore */ }
+  return buffer;
+}
+
 function arrowToObjects(arrowResult) {
   const columns = arrowResult.schema.fields.map(f => f.name);
   const rows = [];

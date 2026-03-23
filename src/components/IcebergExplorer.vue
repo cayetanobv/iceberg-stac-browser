@@ -116,8 +116,27 @@
       <div v-if="mapFeatureCount" class="text-muted mt-1">{{ mapFeatureCount }} features rendered</div>
     </section>
 
-    <!-- Export -->
+    <!-- Download -->
+    <section class="download-panel mb-4" v-if="ready">
+      <h3>Download</h3>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <button class="btn btn-primary btn-sm" @click="downloadFullGeoParquet" :disabled="fullDownloading">
+          <span v-if="fullDownloading" class="spinner-border spinner-border-sm me-1" />
+          Download GeoParquet (latest snapshot)
+        </button>
+        <button class="btn btn-outline-primary btn-sm" @click="downloadQueryResult" :disabled="queryDownloading || !queryData" v-if="queryData">
+          <span v-if="queryDownloading" class="spinner-border spinner-border-sm me-1" />
+          Download query result (.parquet)
+        </button>
+      </div>
+      <div v-if="rowCount" class="text-muted mt-1">Full table: {{ rowCount.toLocaleString() }} rows. Large tables may take a while.</div>
+      <div v-if="downloadError" class="text-danger mt-2">{{ downloadError }}</div>
+      <div v-if="downloadProgress" class="text-muted mt-1">{{ downloadProgress }}</div>
+    </section>
+
+    <!-- Export query results -->
     <section class="export-panel mb-4" v-if="queryData || previewData">
+      <h3>Export</h3>
       <div class="d-flex gap-2">
         <button class="btn btn-outline-secondary btn-sm" @click="exportCSV">Export CSV</button>
         <button class="btn btn-outline-secondary btn-sm" @click="exportGeoJSON" v-if="hasGeometry">Export GeoJSON</button>
@@ -168,7 +187,11 @@ export default defineComponent({
       mapLoaded: false,
       mapError: null,
       mapFeatureCount: null,
-      olMap: null
+      olMap: null,
+      fullDownloading: false,
+      queryDownloading: false,
+      downloadError: null,
+      downloadProgress: null
     };
   },
   computed: {
@@ -395,6 +418,58 @@ export default defineComponent({
       if (extent && isFinite(extent[0])) {
         this.olMap.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16 });
       }
+    },
+    async downloadFullGeoParquet() {
+      this.fullDownloading = true;
+      this.downloadError = null;
+      this.downloadProgress = 'Reading latest snapshot...';
+      try {
+        const { exportToParquet, icebergScanExpr: _unused } = await import('../duckdb.js');
+        const scan = this.buildScanExpr();
+        this.downloadProgress = 'Exporting to Parquet (this may take a while for large tables)...';
+        const buffer = await exportToParquet(`SELECT * FROM ${scan}`);
+        const collectionId = this.collection?.id || 'data';
+        this.downloadBlob(buffer, `${collectionId}_latest.parquet`, 'application/vnd.apache.parquet');
+        this.downloadProgress = null;
+      } catch (err) {
+        this.downloadError = this.formatError(err);
+        this.downloadProgress = null;
+      } finally {
+        this.fullDownloading = false;
+      }
+    },
+    async downloadQueryResult() {
+      this.queryDownloading = true;
+      this.downloadError = null;
+      this.downloadProgress = 'Exporting query result...';
+      try {
+        const { exportToParquet } = await import('../duckdb.js');
+        const buffer = await exportToParquet(this.sqlText);
+        const collectionId = this.collection?.id || 'query';
+        this.downloadBlob(buffer, `${collectionId}_query.parquet`, 'application/vnd.apache.parquet');
+        this.downloadProgress = null;
+      } catch (err) {
+        this.downloadError = this.formatError(err);
+        this.downloadProgress = null;
+      } finally {
+        this.queryDownloading = false;
+      }
+    },
+    buildScanExpr() {
+      const href = this.httpHref;
+      if (this.icebergVersion) {
+        return `iceberg_scan('${href}', allow_moved_paths := true, version_name_format := '%s%s.metadata.json', version := '${this.icebergVersion}')`;
+      }
+      return `iceberg_scan('${href}', allow_moved_paths := true)`;
+    },
+    downloadBlob(buffer, filename, mime) {
+      const blob = new Blob([buffer], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
     },
     resetSQL() {
       this.sqlText = this.defaultSQL;
