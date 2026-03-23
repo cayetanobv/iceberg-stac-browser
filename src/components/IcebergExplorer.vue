@@ -46,7 +46,7 @@
               class="form-control"
               placeholder="Paste access token..."
               @keyup.enter="applyToken"
-            />
+            >
           </div>
           <button class="btn btn-primary" @click="applyToken" :disabled="!token">
             Apply Token
@@ -112,7 +112,7 @@
         {{ mapLoaded ? 'Reload geometries' : 'Load sample geometries (500)' }}
       </button>
       <div v-if="mapError" class="text-danger mt-2">{{ mapError }}</div>
-      <div v-if="mapLoaded" class="map-container mt-2" ref="mapContainer"></div>
+      <div v-if="mapLoaded" class="map-container mt-2" ref="mapContainer" />
       <div v-if="mapFeatureCount" class="text-muted mt-1">{{ mapFeatureCount }} features rendered</div>
     </section>
 
@@ -138,8 +138,6 @@
 
 <script>
 import { defineComponent, defineAsyncComponent } from 'vue';
-
-const ICEBERG_MEDIA_TYPE = 'application/x-iceberg';
 
 export default defineComponent({
   name: 'IcebergExplorer',
@@ -193,13 +191,13 @@ export default defineComponent({
       // STAC Browser stores the raw STAC JSON on the data object.
       // Extension fields like table:columns are top-level properties.
       const d = this.collection;
-      if (!d) return {};
+      if (!d) {return {};}
       // Try direct access (raw JSON), then .properties, then .summaries
       return d;
     },
     tableColumns() {
       const cols = this.stacData['table:columns'];
-      if (!Array.isArray(cols)) return [];
+      if (!Array.isArray(cols)) {return [];}
       return cols;
     },
     columnCount() {
@@ -210,18 +208,18 @@ export default defineComponent({
     },
     partitionInfo() {
       const spec = this.stacData['iceberg:partition_spec'];
-      if (!Array.isArray(spec) || spec.length === 0) return null;
+      if (!Array.isArray(spec) || spec.length === 0) {return null;}
       const parts = spec.map(p => `${p.field} (${p.transform})`).join(', ');
       return `Partitioned by: ${parts}`;
     },
     httpHref() {
       const href = this.icebergHref;
-      if (href.startsWith('gs://')) return href.replace('gs://', 'https://storage.googleapis.com/');
-      if (href.startsWith('s3://')) return href.replace(/^s3:\/\/([^/]+)/, 'https://$1.s3.amazonaws.com');
+      if (href.startsWith('gs://')) {return href.replace('gs://', 'https://storage.googleapis.com/');}
+      if (href.startsWith('s3://')) {return href.replace(/^s3:\/\/([^/]+)/, 'https://$1.s3.amazonaws.com');}
       return href;
     },
     defaultSQL() {
-      if (!this.httpHref) return '';
+      if (!this.httpHref) {return '';}
       if (this.icebergVersion) {
         return `SELECT *\nFROM iceberg_scan('${this.httpHref}', allow_moved_paths := true, version_name_format := '%s%s.metadata.json', version := '${this.icebergVersion}')\nLIMIT 100`;
       }
@@ -229,7 +227,7 @@ export default defineComponent({
     },
     hasGeometry() {
       const primaryGeom = this.stacData['table:primary_geometry'];
-      if (primaryGeom) return true;
+      if (primaryGeom) {return true;}
       return this.tableColumns.some(c => c.name === 'geometry' || c.type === 'geometry' || c.type === 'binary');
     }
   },
