@@ -1,8 +1,8 @@
 {
-  "name": "@radiantearth/stac-browser",
-  "version": "5.0.0-beta.1",
+  "name": "@portolan/iceberg-stac-browser",
+  "version": "0.1.0",
   "type": "module",
-  "description": "A full-fledged UI in Vue for browsing and searching static STAC catalogs and STAC APIs.",
+  "description": "STAC Browser fork with Apache Iceberg data preview powered by DuckDB-WASM. Browse Iceberg tables directly from STAC catalogs.",
   "main": "src/main.js",
   "scripts": {
     "start": "vite",
@@ -47,6 +47,7 @@
   "license": "ISC",
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^15.2.2",
+    "@duckdb/duckdb-wasm": "^1.33.1-dev38.0",
     "@musement/iso-duration": "^1.0.0",
     "@radiantearth/stac-fields": "~1.5.7",
     "@radiantearth/stac-migrate": "~2.0.2",
@@ -115,10 +116,21 @@
       "remark-preset-lint-recommended",
       [
         "remark-lint-no-undefined-references",
-        { "allow": ["!WARNING","!NOTE","!IMPORTANT","!CAUTION","!TIP"] }
+        {
+          "allow": [
+            "!WARNING",
+            "!NOTE",
+            "!IMPORTANT",
+            "!CAUTION",
+            "!TIP"
+          ]
+        }
       ],
       "remark-lint-no-literal-urls",
-      ["remark-lint-no-shortcut-reference-link", false]
+      [
+        "remark-lint-no-shortcut-reference-link",
+        false
+      ]
     ]
   }
 }

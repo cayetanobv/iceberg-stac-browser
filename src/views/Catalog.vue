@@ -33,6 +33,9 @@
               <b-tab v-if="hasThumbnails" :id="tabIds.thumbnails" :title="$t('thumbnails')" no-body>
                 <Thumbnails :thumbnails="thumbnails" />
               </b-tab>
+              <b-tab v-if="hasIcebergAsset" :id="tabIds.iceberg" title="Data Explorer" lazy>
+                <IcebergExplorer :asset="icebergAsset" :collection="data" />
+              </b-tab>
             </b-tabs>
           </b-card>
         </section>
@@ -101,7 +104,8 @@ export default defineComponent({
     MetadataGroups: defineAsyncComponent(() => import('../components/MetadataGroups.vue')),
     Providers: defineAsyncComponent(() => import('../components/Providers.vue')),
     ReadMore,
-    Thumbnails: defineAsyncComponent(() => import('../components/Thumbnails.vue'))
+    Thumbnails: defineAsyncComponent(() => import('../components/Thumbnails.vue')),
+    IcebergExplorer: defineAsyncComponent(() => import('../components/IcebergExplorer.vue'))
   },
   mixins: [
     ShowAssetLinkMixin,
@@ -244,6 +248,16 @@ export default defineComponent({
         }
       }
       return data;
+    },
+    hasIcebergAsset() {
+      const assets = this.data?.assets;
+      if (!assets) return false;
+      return Object.values(assets).some(a => a.type === 'application/x-iceberg' || a.type === 'application/x-iceberg+json');
+    },
+    icebergAsset() {
+      const assets = this.data?.assets;
+      if (!assets) return null;
+      return Object.values(assets).find(a => a.type === 'application/x-iceberg' || a.type === 'application/x-iceberg+json') || null;
     }
   },
   watch: {

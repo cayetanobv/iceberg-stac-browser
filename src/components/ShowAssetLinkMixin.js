@@ -8,7 +8,8 @@ export default defineComponent({
     return {
       tabIds: {
         map: 'map',
-        thumbnails: 'thumbnails'
+        thumbnails: 'thumbnails',
+        iceberg: 'iceberg'
       },
       tab: null,
       shownOnMap: [],
