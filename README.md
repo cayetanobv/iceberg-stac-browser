@@ -1,42 +1,60 @@
-# STAC Browser
+# Iceberg STAC Browser
 
-This is a full-fledged [Spatio-Temporal Asset Catalog (STAC)](https://github.com/radiantearth/stac-spec) browser for STAC APIs and static STAC catalogs.
+A fork of [STAC Browser](https://github.com/radiantearth/stac-browser) with built-in support for browsing and querying [Apache Iceberg](https://iceberg.apache.org/) tables directly from STAC catalogs, powered by [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview.html).
 
-Version: **5.0.0-dev** (supports all STAC versions between 0.6.0 and 1.1.0)
+When a STAC collection has an asset with `type: "application/x-iceberg"`, a **Data Explorer** tab appears with:
 
-This package has also been published to npm as [`@radiantearth/stac-browser`](https://www.npmjs.com/package/@radiantearth/stac-browser).
+- **Schema display** — column names, types, row count, and partition info from STAC metadata
+- **Data preview** — first 100 rows queried via DuckDB-WASM `iceberg_scan()`
+- **SQL editor** — write and run custom SQL queries against Iceberg tables
+- **Geometry preview** — sample geometries rendered on an OpenLayers map
+- **Snapshot listing** — view Iceberg table snapshots (time travel)
+- **Download** — export the latest snapshot or query results as GeoParquet
+- **Export** — download query results as CSV or GeoJSON
 
-It's not officially supported, but you may also be able to use it for
-certain _OGC API - Records_ and _OGC API - Features_ compliant servers.
+All processing runs entirely in the browser. No backend required.
 
-**Please note that STAC Browser is currently with limited funding for both maintenance, bug fixes and improvements. This means issues and PRs may be addressed very slowly.
-If you care about STAC Browser and have some funds to support the future of STAC Browser, please contact <mail@moregeo.it>.**
+## How it works
 
-**Table of Contents:**
+```
+STAC Catalog (static JSON on cloud storage)
+  └── Collection with asset type: application/x-iceberg
+        └── Data Explorer tab appears
+              ├── DuckDB-WASM loads lazily (~47KB gzipped)
+              ├── Iceberg metadata resolved via cloud storage API
+              └── Queries run in-browser via iceberg_scan()
+```
 
-- [STAC Browser](#stac-browser)
-  - [Examples](#examples)
-  - [Get Started](#get-started)
-    - [Private query parameters](#private-query-parameters)
-    - [Versions](#versions)
-    - [Migrate from old versions](#migrate-from-old-versions)
-  - [Customize](#customize)
-    - [Options](#options)
-    - [Languages](#languages)
-    - [Themes](#themes)
-    - [Basemaps](#basemaps)
-    - [Actions](#actions)
-    - [Widgets](#widgets)
-    - [Metadata fields](#metadata-fields)
-    - [Customization through root catalog](#customization-through-root-catalog)
-    - [Custom extensions](#custom-extensions)
-  - [Docker](#docker)
-  - [Contributing](#contributing)
-  - [Sponsors](#sponsors)
+DuckDB-WASM cannot use `gs://` or `s3://` protocols directly — URLs are converted to `https://` automatically. For enterprise metastores (BigLake, Glue), the latest Iceberg metadata version is resolved by listing the `metadata/` directory via the cloud storage JSON API.
+
+## What changed vs upstream STAC Browser
+
+| Area | Change | Size |
+|------|--------|------|
+| New component | `src/components/IcebergExplorer.vue` | ~490 lines |
+| New component | `src/components/IcebergResultsTable.vue` | ~130 lines |
+| New module | `src/duckdb.js` (DuckDB-WASM init + query) | ~180 lines |
+| Modified | `src/views/Catalog.vue` — conditional tab | ~15 lines |
+| Modified | `src/components/ShowAssetLinkMixin.js` — tab ID | 1 line |
+| New dependency | `@duckdb/duckdb-wasm` | package.json |
+
+Total: ~800 lines of new code, ~16 lines of changes to existing code. Small surface area for easy rebasing on upstream updates.
+
+## Keeping in sync with upstream
+
+This fork follows the pattern used by [FAIRiCUBE](https://github.com/FAIRiCUBE/stac-browser), [Copernicus CDSE](https://github.com/eu-cdse/copernicus-browser), and other domain-specific STAC Browser forks. Changes are isolated to new files + minimal modifications to existing ones.
+
+Strategy: **rebase on upstream releases** (not continuous merge). Upstream releases happen every few months, and since we only modify one existing file (`Catalog.vue`), conflicts will be rare.
+
+## Prerequisites
+
+- **Public buckets**: No authentication needed — works out of the box
+- **Private buckets**: Paste a GCS/S3 bearer token in the Data Explorer's authentication panel
+- **CORS**: The cloud storage bucket must allow cross-origin requests from the browser origin
 
 ## Examples
 
-A demo instance is running at <https://radiantearth.github.io/stac-browser/>.
+The upstream demo instance is at <https://radiantearth.github.io/stac-browser/>.
 
 The catalog section of [STAC Index](https://stacindex.org) is also built on top of STAC Browser (currently v2).
 
