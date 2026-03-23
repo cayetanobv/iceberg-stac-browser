@@ -424,10 +424,18 @@ export default defineComponent({
       this.downloadError = null;
       this.downloadProgress = 'Reading latest snapshot...';
       try {
-        const { exportToParquet, icebergScanExpr: _unused } = await import('../duckdb.js');
+        const { exportToParquet, query: duckQuery } = await import('../duckdb.js');
         const scan = this.buildScanExpr();
-        this.downloadProgress = 'Exporting to Parquet (this may take a while for large tables)...';
-        const buffer = await exportToParquet(`SELECT * FROM ${scan}`);
+        // Probe columns to exclude derived spatial ones (added by portolake for partitioning)
+        const probe = await duckQuery(`SELECT * FROM ${scan} LIMIT 0`);
+        const derivedCols = (probe.columns || []).filter(c =>
+          c.startsWith('bbox_') || c.startsWith('geohash_')
+        );
+        const sql = derivedCols.length > 0
+          ? `SELECT * EXCLUDE (${derivedCols.join(', ')}) FROM ${scan}`
+          : `SELECT * FROM ${scan}`;
+        this.downloadProgress = 'Exporting to GeoParquet (this may take a while for large tables)...';
+        const buffer = await exportToParquet(sql);
         const collectionId = this.collection?.id || 'data';
         this.downloadBlob(buffer, `${collectionId}_latest.parquet`, 'application/vnd.apache.parquet');
         this.downloadProgress = null;

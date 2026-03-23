@@ -161,15 +161,39 @@ export async function sampleGeometries(href, version, limit = 500) {
 }
 
 /**
- * Export a full Iceberg table or a SQL query result as Parquet bytes.
- * Uses DuckDB's COPY ... TO with the opfs filesystem for in-memory export.
+ * Export a SQL query result as GeoParquet bytes.
+ *
+ * DuckDB's spatial extension writes proper GeoParquet metadata (including CRS)
+ * when it sees a GEOMETRY-typed column. Iceberg stores geometry as WKB binary,
+ * so we cast it via ST_GeomFromWKB() to produce a valid GeoParquet file.
+ *
+ * Set `convertGeometry: false` to skip the conversion (e.g. for non-spatial queries).
  */
-export async function exportToParquet(sql) {
+export async function exportToParquet(sql, { convertGeometry = true } = {}) {
   const c = await initDuckDB();
   const filename = `export_${Date.now()}.parquet`;
-  await c.query(`COPY (${sql}) TO '${filename}' (FORMAT PARQUET);`);
+
+  let exportSql = sql;
+  if (convertGeometry) {
+    // Check if the source query has a geometry column
+    try {
+      const probe = await c.query(`SELECT * FROM (${sql}) AS __probe LIMIT 0`);
+      const hasGeom = probe.schema.fields.some(f => f.name === 'geometry');
+      if (hasGeom) {
+        // Convert WKB binary → native GEOMETRY so DuckDB writes
+        // the GeoParquet 'geo' metadata key (with CRS) in the Parquet footer
+        exportSql = `
+          SELECT * REPLACE (ST_GeomFromWKB(geometry) AS geometry)
+          FROM (${sql}) AS __src
+        `;
+      }
+    } catch {
+      // Probe failed, export as-is
+    }
+  }
+
+  await c.query(`COPY (${exportSql}) TO '${filename}' (FORMAT PARQUET);`);
   const buffer = await db.copyFileToBuffer(filename);
-  await c.query(`DROP TABLE IF EXISTS __export_cleanup;`);
   // Clean up the file
   try { await db.dropFile(filename); } catch { /* ignore */ }
   return buffer;
