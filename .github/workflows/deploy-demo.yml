@@ -3,11 +3,13 @@ on:
   push:
     branches:
       - main
+permissions:
+  contents: write
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      SB_pathPrefix: "/stac-browser"
+      SB_pathPrefix: "/iceberg-stac-browser"
       SB_historyMode: "hash"
     steps:
       - uses: actions/setup-node@v6
@@ -21,5 +23,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: dist
           exclude_assets: 'report.html'
-          user_name: 'STAC Browser CI'
-          user_email: matthias.mohr@radiant.earth
+          user_name: 'Iceberg STAC Browser CI'
+          user_email: cayetano@carto.com
