@@ -34,10 +34,22 @@
           </template>
         </i18n-t>
       </template>
+      <b-form-input
+        id="registry-search"
+        v-model="query"
+        type="search"
+        class="registry-search mb-2"
+        :placeholder="$t('index.searchRegistry')"
+        :aria-label="$t('index.searchRegistry')"
+        autocomplete="off"
+      />
+      <p v-if="shownCatalogs.length === 0" class="text-muted">
+        {{ $t('index.searchRegistryNoMatch', { query }) }}
+      </p>
       <b-list-group> 
-        <template v-for="catalog in catalogs" :key="catalog.id">
+        <template v-for="catalog in shownCatalogs" :key="catalog.id">
           <b-list-group-item
-            v-if="show(catalog)" button
+            button
             :active="url === catalog.url"
             @click="open(catalog.url)"
           >
@@ -90,6 +102,7 @@ export default defineComponent({
   data() {
     return {
       url: '',
+      query: '',
       catalogs: [],
       registryError: false,
       registryLoading: false,
@@ -100,6 +113,15 @@ export default defineComponent({
   },
   computed: {
     ...mapGetters(['toBrowserPath']),
+    // The search box filters the list. Every word of the query must appear in
+    // the title, the registry id, or the URL of a catalog.
+    shownCatalogs() {
+      const query = this.query.trim();
+      if (!query) {
+        return this.catalogs;
+      }
+      return this.catalogs.filter(catalog => Utils.search(query, [catalog.title, catalog.id, catalog.url]));
+    },
     valid() {
       if (this.url.length === 0) {
         return null;
@@ -171,13 +193,6 @@ export default defineComponent({
       }
       const text = parts.join(' · ');
       return catalog.countsPartial ? this.$t('index.registryCountsPartial', { counts: text }) : text;
-    },
-    show(catalog) {
-      if(!this.url) {
-        return true;
-      }
-
-      return Utils.search(this.url, [catalog.title, catalog.url]);
     },
     setUrl(url) {
       this.url = url;
@@ -252,6 +267,15 @@ export default defineComponent({
       flex: 1;
       overflow: auto;
       border-radius: $border-radius;
+
+      // The search box shares the scrolling container with the list. Keep it
+      // at the top so it stays in view while the list scrolls under it.
+      .registry-search {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        flex: 0 0 auto;
+      }
 
       .list-group {
         width: 100%;

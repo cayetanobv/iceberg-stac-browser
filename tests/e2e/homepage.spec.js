@@ -183,6 +183,47 @@ test.describe('STAC Browser Data Source Selection', () => {
     await expect(page).toHaveTitle(new RegExp(expectedTitle, 'i'));
   });
   
+  test('the registry search box filters the catalog list', async ({ page }) => {
+    await page.goto(HOME_PATH);
+    const indexButtons = page.locator('.stac-index button');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+
+    const search = page.getByRole('searchbox', { name: /search the registry/i });
+    await expect(search).toBeVisible();
+
+    // Every word must match. "dem" alone matches two catalogs, "japan dem" one.
+    await search.fill('dem');
+    await expect(indexButtons).toHaveCount(2);
+    await search.fill('japan dem');
+    await expect(indexButtons).toHaveCount(1);
+    await expect(indexButtons.first()).toContainText('Japan DEM Catalog');
+
+    // The registry id and the URL are searchable, not only the title.
+    await search.fill('kelp-forest-api');
+    await expect(indexButtons).toHaveCount(1);
+    await search.fill('euro-sat');
+    await expect(indexButtons).toHaveCount(1);
+    await expect(indexButtons.first()).toContainText('EuroSat Catalog');
+
+    // A removed catalog stays hidden even when the query names it.
+    await search.fill('retired');
+    await expect(indexButtons).toHaveCount(0);
+    await expect(page.getByText('No registered catalog matches "retired".')).toBeVisible();
+
+    await search.fill('');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+  });
+
+  test('typing a catalog URL does not filter the registry list', async ({ page }) => {
+    await page.goto(HOME_PATH);
+    const indexButtons = page.locator('.stac-index button');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
+    await input.fill('https://data.example/catalog.json');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+  });
+
   test('language switch persists across navigation', async ({ page }) => {
     await page.goto(HOME_PATH);
     const languageButton = page.getByRole('button', { name: /language/i });
