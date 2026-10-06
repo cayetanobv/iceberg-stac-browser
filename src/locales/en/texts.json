@@ -163,6 +163,8 @@
     "registryLoading": "Loading the Portolan registry…",
     "registryUnavailable": "Could not load the Portolan registry. You can still enter a catalog URL above.",
     "selectFromRegistry": "... or select a catalog from the {registry}:",
+    "searchRegistry": "Search the registry by name or URL",
+    "searchRegistryNoMatch": "No registered catalog matches \"{query}\".",
     "selectStacIndex": "... or select one from {stacIndex}:",
     "specifyCatalog": "Please enter a Portolan catalog.json file",
     "urlInvalid": "The URL is invalid.",

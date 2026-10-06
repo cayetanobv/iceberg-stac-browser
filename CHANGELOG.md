@@ -21,6 +21,8 @@ Portolan Browser 0.1.0 forked from upstream 5.1.0-dev.
 
 ### Added
 
+- A search box on the start page filters the registry list. Every word of the query must appear
+  in the catalog title, its registry id, or its URL. The catalog URL field no longer filters the list
 - A categorical COG takes its colours from the `color_hint` values of its own `classification:classes`,
   ahead of any colormap in a render, where every class carries a hint. The layer control lists the
   class names as a legend, whichever rule supplies the colours
