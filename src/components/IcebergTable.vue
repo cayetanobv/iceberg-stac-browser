@@ -442,8 +442,7 @@ export default defineComponent({
         if (this.token) {
           await duckdb.setGcsToken(this.token);
         }
-        await this.applyRouting(duckdb);
-        this.columns = await duckdb.describe(this.scan);
+        this.columns = await duckdb.withRouting(this.storage, () => duckdb.describe(this.scan));
         this.geometryInfo = duckdb.geometryColumn(this.columns, this.info.primaryGeometry);
         this.duck.ready = true;
       } catch (error) {
@@ -462,23 +461,14 @@ export default defineComponent({
         this.duck.starting = false;
       }
     },
-    /**
-     * Route s3:// paths for this table and no other. The routing is shared by
-     * the whole DuckDB session, so it is set again before every query: what
-     * applies is always the table on screen, whatever ran before.
-     */
-    async applyRouting(duckdb) {
-      if (!this.unmounted) {
-        await duckdb.setS3Endpoint(this.storage);
-      }
-    },
     async run(kind, fn) {
       this.busy = kind;
       this.queryError = null;
       this.status = null;
       try {
-        await this.applyRouting(await import('../utils/duckdb.js'));
-        await fn();
+        // Every query runs with this table's S3 routing, atomically.
+        const { withRouting } = await import('../utils/duckdb.js');
+        await withRouting(this.storage, fn);
       } catch (error) {
         this.queryError = this.formatError(error);
       } finally {

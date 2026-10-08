@@ -92,23 +92,36 @@ export async function setGcsToken(token) {
 
 const ENDPOINT_SECRET = 'iceberg_s3_endpoint';
 
-/**
- * Send `s3://bucket` paths to an S3-compatible endpoint instead of AWS,
- * reading anonymously, or drop that routing with `null`.
- *
- * The endpoint comes from the collection, and DuckDB lives for the whole
- * session. So only the table on screen has a routing: each call replaces the
- * previous one. Otherwise one collection could send another collection's
- * bucket to a host of its choice.
- */
-export async function setS3Endpoint(storage) {
-  const conn = await initDuckDB();
+// Send `s3://bucket` paths to an S3-compatible endpoint instead of AWS,
+// reading anonymously, or drop that routing with `null`.
+async function routeS3(conn, storage) {
   await conn.query(`DROP SECRET IF EXISTS ${ENDPOINT_SECRET};`);
   if (!storage) {
     return;
   }
   const { bucket, endpoint, urlStyle, useSsl } = storage;
   await conn.query(`CREATE SECRET ${ENDPOINT_SECRET} (TYPE S3, ENDPOINT ${sqlString(endpoint)}, URL_STYLE ${sqlString(urlStyle)}, USE_SSL ${useSsl ? 'true' : 'false'}, SCOPE ${sqlString(`s3://${bucket}`)});`);
+}
+
+let routingLock = Promise.resolve();
+
+/**
+ * Run `fn` with s3:// paths routed for one table, and for no other.
+ *
+ * The endpoint comes from the collection, and DuckDB lives for the whole
+ * session, so the routing is shared state that one collection could point
+ * at a host of its choice for another collection's bucket. Each call holds
+ * a session-wide lock while it sets the routing and runs `fn`, so no other
+ * routing can apply between the two. `fn` must not call withRouting itself.
+ */
+export function withRouting(storage, fn) {
+  const result = routingLock.then(async () => {
+    await routeS3(await initDuckDB(), storage);
+    return fn();
+  });
+  // The next caller waits for this one, whether it succeeded or not.
+  routingLock = result.catch(() => {});
+  return result;
 }
 
 export async function setS3Credentials({ accessKeyId, secretAccessKey, region, sessionToken }) {

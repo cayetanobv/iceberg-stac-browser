@@ -8,10 +8,10 @@ Demo: <https://cayetanobv.github.io/iceberg-stac-browser/>
 
 ## Iceberg tables <!-- omit in toc -->
 
-A collection that carries `iceberg:*` fields gets an **Apache Iceberg table** section:
+A collection with `iceberg:*` fields gets an **Apache Iceberg table** section:
 
-- **Connection**: catalog type, catalog URI, REST prefix, authorization, table id, metadata location,
-  format version, current snapshot and partition spec.
+- **Connection**: every field of extension v1.1.0, from the catalog type and URI to the current
+  snapshot and the partition spec.
 - **Schema** and **Snapshots**: read from the table's `metadata.json`. A collection that pins a snapshot
   the table no longer has is reported as stale.
 - **Code**: DuckDB, PyIceberg, BigQuery and DuckDB `ATTACH` snippets, where the collection has the fields
@@ -25,7 +25,7 @@ extension v1.0.0 still opens, with notices for the fields to update.
 
 ---
 
-## Portolan Browser <!-- omit in toc -->
+## Upstream project <!-- omit in toc -->
 
 Portolan Browser is a web viewer for [Portolan](https://www.portolan-sdi.org/) catalogs. Point it at a
 catalog and it draws the data on a map, renders the tables behind that data, and lets you walk the
