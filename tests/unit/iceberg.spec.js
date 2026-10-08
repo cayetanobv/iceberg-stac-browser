@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  bigQueryTableName,
   compareWithTable,
   connectionSnippets,
   defaultSql,
@@ -324,5 +325,15 @@ describe('inferS3Storage', () => {
   it('offers no PyIceberg snippet for a location it cannot open', () => {
     const info = getIcebergInfo({ 'iceberg:catalog_type': 'static', 'iceberg:metadata_location': 'https://cdn.example/t/metadata/v1.metadata.json' })
     expect(connectionSnippets(info).map(s => s.id)).toEqual(['duckdb-scan'])
+  })
+})
+
+describe('bigQueryTableName', () => {
+  it('keeps a hostile table id inside the quoted identifier', () => {
+    for (const id of ['ns.t` ; DROP TABLE prod.users; --', 'ns.x`; SELECT 1; --']) {
+      expect(bigQueryTableName(id)).toMatch(/^[A-Za-z0-9_]+$/)
+    }
+    expect(bigQueryTableName(null)).toBe('iceberg_table')
+    expect(bigQueryTableName('v3.kunta_2025')).toBe('kunta_2025')
   })
 })

@@ -90,13 +90,25 @@ export async function setGcsToken(token) {
   await conn.query(`CREATE OR REPLACE SECRET iceberg_gcs (TYPE GCS, TOKEN ${sqlString(token)});`);
 }
 
+const ENDPOINT_SECRET = 'iceberg_s3_endpoint';
+
 /**
  * Send `s3://bucket` paths to an S3-compatible endpoint instead of AWS,
- * reading anonymously.
+ * reading anonymously, or drop that routing with `null`.
+ *
+ * The endpoint comes from the collection, and DuckDB lives for the whole
+ * session. So only the table on screen has a routing: each call replaces the
+ * previous one. Otherwise one collection could send another collection's
+ * bucket to a host of its choice.
  */
-export async function setS3Endpoint({ bucket, endpoint, urlStyle, useSsl }) {
+export async function setS3Endpoint(storage) {
   const conn = await initDuckDB();
-  await conn.query(`CREATE OR REPLACE SECRET ${sqlIdent(`iceberg_s3_${bucket}`)} (TYPE S3, ENDPOINT ${sqlString(endpoint)}, URL_STYLE ${sqlString(urlStyle)}, USE_SSL ${useSsl ? 'true' : 'false'}, SCOPE ${sqlString(`s3://${bucket}`)});`);
+  await conn.query(`DROP SECRET IF EXISTS ${ENDPOINT_SECRET};`);
+  if (!storage) {
+    return;
+  }
+  const { bucket, endpoint, urlStyle, useSsl } = storage;
+  await conn.query(`CREATE SECRET ${ENDPOINT_SECRET} (TYPE S3, ENDPOINT ${sqlString(endpoint)}, URL_STYLE ${sqlString(urlStyle)}, USE_SSL ${useSsl ? 'true' : 'false'}, SCOPE ${sqlString(`s3://${bucket}`)});`);
 }
 
 export async function setS3Credentials({ accessKeyId, secretAccessKey, region, sessionToken }) {

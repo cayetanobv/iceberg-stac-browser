@@ -458,6 +458,16 @@ export function defaultSql(info, options = {}) {
 }
 
 /**
+ * A BigQuery table name from the Iceberg table id. The id comes from the
+ * collection, which may be hostile, so only letters, digits and underscores
+ * reach the copied snippet: a backtick would end the quoted identifier.
+ */
+export function bigQueryTableName(tableId) {
+  const name = String(tableId || '').split('.').pop().replace(/[^A-Za-z0-9_]/g, '_');
+  return name || 'iceberg_table';
+}
+
+/**
  * Code a user copies to open the table outside the browser. Only snippets the
  * collection has the fields for are returned.
  */
@@ -511,7 +521,7 @@ export function connectionSnippets(info, storage = null) {
         title: 'BigQuery',
         language: 'sql',
         code: [
-          `CREATE EXTERNAL TABLE \`my_dataset.${(info.tableId || 'iceberg_table').split('.').pop()}\``,
+          `CREATE EXTERNAL TABLE \`my_dataset.${bigQueryTableName(info.tableId)}\``,
           `OPTIONS (format = 'ICEBERG', uris = [${sqlString(objectStore)}]);`,
         ].join('\n'),
       });

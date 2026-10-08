@@ -436,9 +436,8 @@ export default defineComponent({
         if (this.token) {
           await duckdb.setGcsToken(this.token);
         }
-        if (this.storage) {
-          await duckdb.setS3Endpoint(this.storage);
-        }
+        // Always set it, so a routing left by another collection is dropped.
+        await duckdb.setS3Endpoint(this.storage);
         this.columns = await duckdb.describe(this.scan);
         this.geometryInfo = duckdb.geometryColumn(this.columns, this.info.primaryGeometry);
         this.duck.ready = true;
