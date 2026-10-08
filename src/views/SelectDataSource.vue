@@ -17,28 +17,62 @@
       </b-form-group>
       <b-button type="submit" variant="primary">{{ $t('index.load') }}</b-button>
     </b-form>
-    <hr v-if="stacIndex.length > 0">
-    <b-form-group v-if="stacIndex.length > 0" class="stac-index">
+    <hr v-if="catalogs.length > 0 || registryError || registryLoading">
+    <p v-if="registryLoading" class="text-muted">{{ $t('index.registryLoading') }}</p>
+    <b-alert v-if="registryError" variant="warning" show>
+      {{ $t('index.registryUnavailable') }}
+    </b-alert>
+    <b-form-group v-if="catalogs.length > 0" class="stac-index">
       <template #label>
-        <i18n-t keypath="index.selectStacIndex" tag="span" scope="global">
-          <template #stacIndex>
-            <a href="https://stacindex.org" target="_blank">STAC Index</a>
+        <i18n-t keypath="index.selectFromRegistry" tag="span" scope="global">
+          <template #registry>
+            <a
+              href="https://github.com/portolan-sdi/portolan-registry"
+              target="_blank" rel="noopener noreferrer"
+              @click.stop
+            >{{ $t('index.portolanRegistry') }}</a>
           </template>
         </i18n-t>
       </template>
+      <b-form-input
+        id="registry-search"
+        v-model="query"
+        type="search"
+        class="registry-search mb-2"
+        :placeholder="$t('index.searchRegistry')"
+        :aria-label="$t('index.searchRegistry')"
+        autocomplete="off"
+      />
+      <p v-if="shownCatalogs.length === 0" class="text-muted">
+        {{ $t('index.searchRegistryNoMatch', { query }) }}
+      </p>
       <b-list-group> 
-        <template v-for="catalog in stacIndex" :key="catalog.id">
+        <template v-for="catalog in shownCatalogs" :key="catalog.id">
           <b-list-group-item
-            v-if="show(catalog)" button
+            button
             :active="url === catalog.url"
             @click="open(catalog.url)"
           >
-            <div class="d-flex justify-content-between align-items-baseline mb-1">
-              <strong>{{ catalog.title }}</strong>
-              <b-badge v-if="catalog.isApi" variant="danger">{{ $t('index.api') }}</b-badge>
-              <b-badge v-else variant="success">{{ $t('index.catalog') }}</b-badge>
+            <div class="catalog-entry">
+              <!-- The logo is decorative: the name it stands for is right beside it,
+                   so alt text here would only make a screen reader say it twice. -->
+              <span class="catalog-logo">
+                <img
+                  v-if="catalog.logo && !failedLogos.has(catalog.id)"
+                  :src="catalog.logo.href"
+                  alt=""
+                  loading="lazy" referrerpolicy="no-referrer"
+                  @error="failedLogos.add(catalog.id)"
+                >
+              </span>
+              <span class="catalog-detail">
+                <span class="d-flex justify-content-between align-items-baseline mb-1">
+                  <strong>{{ catalog.title }}</strong>
+                  <b-badge v-if="catalog.isApi" variant="danger">{{ $t('index.api') }}</b-badge>
+                </span>
+                <Description v-if="summary(catalog)" :description="summary(catalog)" compact />
+              </span>
             </div>
-            <Description :description="catalog.summary" compact />
           </b-list-group-item>
         </template>
       </b-list-group>
@@ -51,7 +85,14 @@ import { mapGetters } from "vuex";
 import { defineComponent } from 'vue';
 import Description from '../components/Description.vue';
 import Utils from '../utils';
+import { hasText, isObject } from 'stac-js/src/utils.js';
+import CONFIG from '../merged-config';
+import { parseRegistryExport } from '../utils/registry';
 import axios from "axios";
+
+// Long enough for a cold CDN fetch, short enough that a hung registry does not
+// hold the page hostage.
+const REGISTRY_TIMEOUT_MS = 15000;
 
 export default defineComponent({
   name: "SelectDataSource",
@@ -61,11 +102,26 @@ export default defineComponent({
   data() {
     return {
       url: '',
-      stacIndex: []
+      query: '',
+      catalogs: [],
+      registryError: false,
+      registryLoading: false,
+      // A logo is a URL on someone else's host; when one 404s or is blocked,
+      // drop it rather than leave a broken-image glyph in the list.
+      failedLogos: new Set()
     };
   },
   computed: {
     ...mapGetters(['toBrowserPath']),
+    // The search box filters the list. Every word of the query must appear in
+    // the title, the registry id, or the URL of a catalog.
+    shownCatalogs() {
+      const query = this.query.trim();
+      if (!query) {
+        return this.catalogs;
+      }
+      return this.catalogs.filter(catalog => Utils.search(query, [catalog.title, catalog.id, catalog.url]));
+    },
     valid() {
       if (this.url.length === 0) {
         return null;
@@ -93,26 +149,50 @@ export default defineComponent({
   async created() {
     // Reset loaded STAC catalog
     this.$store.commit('resetCatalog', true);
-    // Load entries from STAC Index
+    // Load the registered catalogs from the Portolan registry
+    if (!hasText(CONFIG.registryUrl)) {
+      return;
+    }
+    this.registryLoading = true;
     try {
-      let response = await axios.get('https://stacindex.org/api/catalogs');
-      if(Array.isArray(response.data)) {
-        this.stacIndex = response.data;
+      // The registry is a third-party host, so a hang must not leave the page
+      // waiting on it forever with nothing said.
+      const response = await axios.get(CONFIG.registryUrl, { timeout: REGISTRY_TIMEOUT_MS });
+      // A registry that legitimately lists nothing is not a failure. Only a
+      // response that is not a registry document at all is — an error page
+      // served with a 200 lands here rather than in the catch.
+      if (!isObject(response.data) || !Array.isArray(response.data.links)) {
+        throw new Error('The response is not a Portolan registry export');
       }
+      this.catalogs = parseRegistryExport(response.data);
     } catch (error) {
-      console.error('Failed to load STAC Index:', error);
+      console.error('Failed to load the Portolan registry:', error);
+      this.registryError = true;
+    } finally {
+      this.registryLoading = false;
     }
   },
   methods: {
-    show(catalog) {
-      if (catalog.access === 'private') {
-        return false;
+    // The registry stores no prose about a catalog, so say what it does
+    // measure. Built here rather than in the parser so the words and the
+    // number formatting follow the interface language.
+    summary(catalog) {
+      const parts = [];
+      if (catalog.collectionCount) {
+        parts.push(this.$t('index.registryCollections', {
+          count: catalog.collectionCount.toLocaleString()
+        }, catalog.collectionCount));
       }
-      else if(!this.url) {
-        return true;
+      if (catalog.featureCount) {
+        parts.push(this.$t('index.registryFeatures', {
+          count: catalog.featureCount.toLocaleString()
+        }, catalog.featureCount));
       }
-
-      return Utils.search(this.url, [catalog.title, catalog.url]);
+      if (parts.length === 0) {
+        return '';
+      }
+      const text = parts.join(' · ');
+      return catalog.countsPartial ? this.$t('index.registryCountsPartial', { counts: text }) : text;
     },
     setUrl(url) {
       this.url = url;
@@ -139,6 +219,37 @@ export default defineComponent({
   flex: 1;
   overflow: hidden;
 
+  // Logo beside the text rather than above it, in a slot of fixed width so the
+  // titles line up down the list whether or not a catalog has one — only about
+  // half of them do.
+  .catalog-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .catalog-logo {
+    flex: 0 0 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0.1rem;
+
+    img {
+      // Logos arrive as anything from a square mark to a wide wordmark, so bound
+      // both axes and let the aspect ratio survive.
+      max-width: 4rem;
+      max-height: 2.5rem;
+      object-fit: contain;
+    }
+  }
+
+  .catalog-detail {
+    flex: 1;
+    min-width: 0;
+    display: block;
+  }
+
   hr {
     width: 100%;
   }
@@ -156,6 +267,15 @@ export default defineComponent({
       flex: 1;
       overflow: auto;
       border-radius: $border-radius;
+
+      // The search box shares the scrolling container with the list. Keep it
+      // at the top so it stays in view while the list scrolls under it.
+      .registry-search {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        flex: 0 0 auto;
+      }
 
       .list-group {
         width: 100%;

@@ -1,5 +1,12 @@
 <template>
   <div :class="{cc: true, [cssStacType]: true, empty: !hasCatalogs && !hasItems}" :key="data.id">
+    <section v-if="isCollection" class="hero-map">
+      <MapView
+        ref="mapView" :stac="data" v-bind="mapData" @changed="dataChanged"
+        @empty="handleEmptyMap" popover
+        hideFootprint
+      />
+    </section>
     <b-row>
       <b-col class="meta">
         <WidgetHook id="view-catalog-meta-start" />
@@ -24,23 +31,20 @@
           </section>
           <LinkList v-if="linkPosition === 'left'" :title="$t('additionalResources')" :links="additionalLinks" />
         </section>
-        <section v-if="isCollection || hasThumbnails" class="mb-4">
-          <b-card no-body class="maps-preview">
-            <b-tabs v-model="tab" ref="tabs" pills card vertical end>
-              <b-tab v-if="isCollection" :id="tabIds.map" :title="$t('map')" no-body>
-                <MapView :stac="data" v-bind="mapData" @changed="dataChanged" @empty="handleEmptyMap" onfocusOnly popover />
-              </b-tab>
-              <b-tab v-if="hasThumbnails" :id="tabIds.thumbnails" :title="$t('thumbnails')" no-body>
-                <Thumbnails :thumbnails="thumbnails" />
-              </b-tab>
-              <b-tab v-if="hasIcebergAsset" :id="tabIds.iceberg" title="Data Explorer" lazy>
-                <IcebergExplorer :asset="icebergAsset" :collection="data" />
-              </b-tab>
-            </b-tabs>
-          </b-card>
+        <section v-if="hasThumbnails" class="mb-4 thumbnail-section">
+          <div class="thumbnail-header" @click="thumbnailOpen = !thumbnailOpen">
+            <h3 class="mb-0">{{ $t('thumbnails') }}</h3>
+            <BIconChevronDown v-if="!thumbnailOpen" />
+            <BIconChevronUp v-else />
+          </div>
+          <b-collapse v-model="thumbnailOpen">
+            <Thumbnails :thumbnails="thumbnails" class="mt-2" />
+          </b-collapse>
         </section>
         <Assets v-if="hasAssets" :assets="assets" :shown="selectedReferences" @show-asset="showAsset" />
         <Assets v-if="hasItemAssets && !hasItems" :assets="itemAssets" :definition="true" />
+        <ParquetViewer v-if="hasAssets" :assets="assets" @zoom-to-bbox="zoomToBbox" @highlight-bbox="highlightBbox" />
+        <IcebergTable v-if="hasIceberg" :collection="data" />
         <Providers v-if="providers" :providers="providers" />
         <MetadataGroups class="mb-4" :type="data.type" :data="data" :ignoreFields="ignoredMetadataFields" />
         <LinkList v-if="linkPosition === 'right'" :title="$t('additionalResources')" :links="additionalLinks" />
@@ -48,13 +52,17 @@
       </b-col>
       <b-col class="catalogs-container" v-if="hasCatalogs">
         <WidgetHook id="view-catalog-catalogs-start" />
-        <Catalogs :catalogs="catalogs" :hasMore="hasMore" @load-more="loadMoreCollections" />
+        <Catalogs
+          :apiSearch="hasApiCollections" :catalogs="catalogs" :hasMore="hasMore"
+          @load-more="loadMoreCollections" @search="searchCollections"
+          :loading="Boolean(loadingCollections) || loadingNextCollectionsPage" :loadingMore="loadingCollections === 'more' || loadingNextCollectionsPage"
+        />
         <WidgetHook id="view-catalog-catalogs-end" />
       </b-col>
       <b-col class="items-container" v-if="hasItems || hasItemAssets">
         <WidgetHook id="view-catalog-items-start" />
         <Items
-          :stac="data" :items="items" :api="isApi"
+          :stac="data" :items="items" :api="hasApiItems"
           :showFilters="showFilters" :apiFilters="filters"
           :pagination="itemPages" :loading="apiItemsLoading"
           :count="apiItemsNumberMatched"
@@ -78,21 +86,26 @@ import ReadMore from "../components/ReadMore.vue";
 import ShowAssetLinkMixin from '../components/ShowAssetLinkMixin';
 import StacFieldsMixin from '../components/StacFieldsMixin';
 import { formatLicense, formatTemporalExtents } from '@radiantearth/stac-fields/formatters';
+import BIconChevronDown from '~icons/bi/chevron-down';
+import BIconChevronUp from '~icons/bi/chevron-up';
 import Utils from '../utils';
-import { hasText, isObject } from 'stac-js/src/utils.js';
+import { hasText, isObject, size } from 'stac-js/src/utils.js';
 import { addSchemaToDocument, createCatalogSchema } from '../schema-org';
-import { ItemCollection } from '../models/stac.js';
+import { ItemCollection } from 'stac-js';
 import DeprecationMixin from '../components/DeprecationMixin.js';
-import { BTab, BTabs, BCard } from 'bootstrap-vue-next';
+import { BCollapse } from 'bootstrap-vue-next';
+import { getIgnoredFields } from '../ignored-metadata.js';
+import { fetchQueryablesForLink, fetchSortablesForLink } from '../store/utils';
+import { hasIcebergMetadata } from '../utils/iceberg.js';
 
 export default defineComponent({
   name: "Catalog",
   components: {
-    BTab,
-    BTabs,
-    BCard,
     AnonymizedNotice: defineAsyncComponent(() => import('../components/AnonymizedNotice.vue')),
     Assets: defineAsyncComponent(() => import('../components/Assets.vue')),
+    BCollapse,
+    BIconChevronDown,
+    BIconChevronUp,
     Catalogs,
     CollectionLink: defineAsyncComponent(() => import('../components/CollectionLink.vue')),
     DeprecationNotice: defineAsyncComponent(() => import('../components/DeprecationNotice.vue')),
@@ -105,7 +118,8 @@ export default defineComponent({
     Providers: defineAsyncComponent(() => import('../components/Providers.vue')),
     ReadMore,
     Thumbnails: defineAsyncComponent(() => import('../components/Thumbnails.vue')),
-    IcebergExplorer: defineAsyncComponent(() => import('../components/IcebergExplorer.vue'))
+    ParquetViewer: defineAsyncComponent(() => import('../components/ParquetViewer.vue')),
+    IcebergTable: defineAsyncComponent(() => import('../components/IcebergTable.vue'))
   },
   mixins: [
     ShowAssetLinkMixin,
@@ -114,46 +128,22 @@ export default defineComponent({
   ],
   data() {
     return {
+      thumbnailOpen: false,
       filters: {},
-      ignoredMetadataFields: [
-        // Catalog and Collection fields that are handled directly
-        'stac_version',
-        'stac_extensions',
-        'id',
-        'type',
-        'title',
-        'description',
-        'keywords',
-        'providers',
-        'license',
-        'extent',
-        'summaries',
-        'links',
-        'assets',
-        'item_assets',
-        // Don't show these complex lists of coordinates: https://github.com/radiantearth/stac-browser/issues/141
-        'proj:bbox',
-        'proj:geometry',
-        // API landing page, not very useful to display, but https://github.com/radiantearth/stac-browser/issues/136
-        'conformsTo',
-        // Will be rendered with a custom rendered
-        'deprecated',
-        // Special handling for the warning of the anonymized-location extension
-        'anon:warning',
-        // Special handling for the stats extension
-        'stats:catalogs',
-        'stats:collections',
-        'stats:items',
-        // Special handling for auth
-        'auth:schemes',
-        // Special handling for the STAC Browser config
-        'stac_browser'
-      ]
+      loadingCollections: null,
+      isSearchingCollections: false,
+      currentSearchRequestId: 0,
     };
   },
   computed: {
-    ...mapState(['data', 'url', 'apiCatalogPriority',  'apiItems', 'apiItemsLink', 'apiItemsPagination', 'apiItemsNumberMatched', 'nextCollectionsLink', 'stateQueryParameters']),
-    ...mapGetters(['catalogs', 'collectionLink', 'isCollection', 'items', 'getApiItemsLoading', 'parentLink', 'rootLink']),
+    ...mapState(['data', 'apiCatalogPriority', 'apiItemsLink', 'apiItemsPagination', 'apiItemsNumberMatched', 'nextCollectionsLink', 'stateQueryParameters']),
+    ...mapGetters(['catalogs', 'collectionLink', 'isApiChildrenLoading', 'isCollection', 'items', 'getApiItemsLoading', 'parentLink', 'rootLink']),
+    ignoredMetadataFields() {
+      return getIgnoredFields(this.data, 'CatalogLike');
+    },
+    hasIceberg() {
+      return this.isCollection && hasIcebergMetadata(this.data);
+    },
     cssStacType() {
       if (hasText(this.data?.type)) {
         return this.data?.type.toLowerCase();
@@ -161,7 +151,7 @@ export default defineComponent({
       return null;
     },
     showFilters() {
-      return Boolean(this.stateQueryParameters['itemFilterOpen']);
+      return Boolean(this.stateQueryParameters.itemFilterOpen);
     },
     linkPosition() {
       if (this.additionalLinks.length === 0) {
@@ -179,6 +169,10 @@ export default defineComponent({
     },
     hasMore() {
       return this.apiCatalogPriority !== 'childs' && Boolean(this.nextCollectionsLink);
+    },
+    loadingNextCollectionsPage() {
+      // Pages may also be loading through other components, e.g. the tree
+      return this.isApiChildrenLoading(this.data);
     },
     licenses() {
       if (this.data.license) {
@@ -200,8 +194,8 @@ export default defineComponent({
       if (this.isCollection && this.data.extent.temporal.interval.length > 0) {
         let extents = this.data.extent.temporal.interval;
         if (extents.length > 1) {
-            // Remove union temporal extent in favor of more concrete extents
-            extents = extents.slice(1);
+          // Remove union temporal extent in favor of more concrete extents
+          extents = extents.slice(1);
         }
         return this.formatTemporalExtents(extents);
       }
@@ -224,14 +218,17 @@ export default defineComponent({
       }
       return pages;
     },
-    isApi() {
+    hasApiItems() {
       return Boolean(this.apiItemsLink);
     },
+    hasApiCollections() {
+      return Boolean(this.data.getApiCollectionsLink()) && this.apiCatalogPriority !== 'childs';
+    },
     hasItems() {
-      return this.items.length > 0 || this.isApi;
+      return this.items.length > 0 || this.hasApiItems;
     },
     hasCatalogs() {
-      return this.catalogs.length > 0;
+      return this.catalogs.length > 0 || this.hasApiCollections || this.isSearchingCollections;
     },
     mapData() {
       const data = {};
@@ -248,37 +245,100 @@ export default defineComponent({
         }
       }
       return data;
-    },
-    hasIcebergAsset() {
-      const assets = this.data?.assets;
-      if (!assets) return false;
-      return Object.values(assets).some(a => a.type === 'application/x-iceberg' || a.type === 'application/x-iceberg+json');
-    },
-    icebergAsset() {
-      const assets = this.data?.assets;
-      if (!assets) return null;
-      return Object.values(assets).find(a => a.type === 'application/x-iceberg' || a.type === 'application/x-iceberg+json') || null;
     }
   },
   watch: {
     data: {
       immediate: true,
-      handler(data) {
+      async handler(newData, oldData) {
         try {
-          let schema = createCatalogSchema(data, [this.parentLink, this.rootLink], this.$store);
+          let schema = createCatalogSchema(newData, [this.parentLink, this.rootLink], this.$store);
           addSchemaToDocument(document, schema);
         } catch (error) {
           console.error(error);
+        }
+
+        if (!newData?.isCollection) {
+          return;
+        }
+        if (oldData?.id === newData?.id) {
+          return;
+        }
+
+        // Carry the collection search over into the item filters, but only
+        // when the user explicitly jumped here from the collection search
+        // results (clicking a link there arms the one-shot flag), so that
+        // plain browsing is not affected by unrelated leftover filters.
+        if (!this.$store.state.search.carryOnNextNavigation) {
+          return;
+        }
+        this.$store.commit('search/setCarryOnNextNavigation', false);
+
+        if (this.$store.getters['search/hasCollectionSearchCriteria']) {
+          // In-collection item search is Features, not item-search
+          await this.$store.dispatch('search/carryToItemSearch', {
+            collection: newData,
+            fetchQueryables: (collection) => fetchQueryablesForLink(this.$store, collection.getQueryablesLink?.()),
+            fetchSortables: (collection) => fetchSortablesForLink(this.$store, collection.getSortablesLink?.()),
+            targetType: 'Items',
+          });
+
+          this.filters = this.$store.getters['search/itemSearchParams'];
+          // Open the filter panel so that the user can see which filters are
+          // applied to the item list instead of filtering it silently
+          this.$store.commit('updateState', {type: 'itemFilterOpen', value: 1});
         }
       }
     }
   },
   methods: {
     filtersShown(show) {
-        this.$store.commit('updateState', {type: 'itemFilterOpen', value: show ? 1 : null});
+      this.$store.commit('updateState', {type: 'itemFilterOpen', value: show ? 1 : null});
     },
-    loadMoreCollections() {
-      this.$store.dispatch('loadNextApiCollections', {show: true});
+    async loadMoreCollections() {
+      const requestId = this.currentSearchRequestId;
+      this.loadingCollections = "more";
+      try {
+        const params = {
+          show: true,
+          searching: this.isSearchingCollections
+        };
+        if (this.isSearchingCollections) {
+          params.searchRequestId = requestId;
+        }
+        await this.$store.dispatch('loadNextApiCollections', {
+          ...params
+        });
+      } catch (error) {
+        this.$store.commit('showGlobalError', {
+          error,
+          message: this.$t('errors.loadApiCollectionsFailed')
+        });
+      } finally {
+        if (requestId === this.currentSearchRequestId && this.loadingCollections === 'more') {
+          this.loadingCollections = null;
+        }
+      }
+    },
+    async searchCollections(searchTerms) {
+      this.loadingCollections = "all";
+      this.isSearchingCollections = size(searchTerms) > 0;
+      // Increment request ID to invalidate any in-flight requests from previous searches
+      const requestId = ++this.currentSearchRequestId;
+      try {
+        await this.$store.dispatch('loadNextApiCollections', {
+          stac: this.data, show: true, q: searchTerms, searching: this.isSearchingCollections, searchRequestId: requestId
+        });
+      } catch (error) {
+        this.$store.commit('showGlobalError', {
+          error,
+          message: this.$t('errors.loadApiCollectionsFailed')
+        });
+      } finally {
+        if (requestId === this.currentSearchRequestId && this.loadingCollections === 'all') {
+          this.loadingCollections = null;
+        }
+      }
     },
     async paginateItems(link) {
       try {
@@ -288,6 +348,16 @@ export default defineComponent({
           error,
           message: this.$t('errors.loadItems')
         });
+      }
+    },
+    zoomToBbox({ bbox, crs, crsDefinition }) {
+      if (this.$refs.mapView?.zoomToBbox) {
+        this.$refs.mapView.zoomToBbox(bbox, crs, crsDefinition);
+      }
+    },
+    highlightBbox({ bbox, crs, crsDefinition }) {
+      if (this.$refs.mapView?.highlightBbox) {
+        this.$refs.mapView.highlightBbox(bbox, crs, crsDefinition);
       }
     },
     async filterItems(filters, reset) {
@@ -312,11 +382,24 @@ export default defineComponent({
 <style lang="scss">
 @import 'bootstrap/scss/mixins';
 @import "../theme/variables.scss";
+@import "../theme/mixins.scss";
 
 #stac-browser .cc {
+  .hero-map {
+    margin: -155px (-$block-gap) $block-gap;
+
+    .map {
+      height: 555px;
+    }
+
+    .maplibregl-ctrl-top-right {
+      top: 150px;
+    }
+  }
+
   .meta {
     min-width: 100%;
-    margin-bottom: $block-margin;
+    margin-bottom: var(--sb-block-gap);
   }
   &.collection .meta {
     min-width: 33%;
@@ -349,7 +432,7 @@ export default defineComponent({
     }
   }
 
-  @include media-breakpoint-down(md) {
+  @include media-breakpoint-down(lg) {
     > .row {
       > .meta,
       > .items-container,
@@ -359,7 +442,7 @@ export default defineComponent({
 
       > .meta {
         order: 1;
-        margin-bottom: $block-margin;
+        margin-bottom: var(--sb-block-gap);
       }
       > .items-container {
         order: 2;
@@ -367,6 +450,12 @@ export default defineComponent({
       > .catalogs-container {
         order: 3;
       }
+    }
+  }
+
+  .thumbnail-section {
+    .thumbnail-header {
+      @include section-header;
     }
   }
 

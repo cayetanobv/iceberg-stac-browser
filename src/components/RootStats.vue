@@ -87,8 +87,8 @@ export default {
       for (let key in stats) {
         if (isObject(this.root[key])) {
           let entry = Object.assign(stats[key], this.root[key]);
-          if (size(entry['versions']) === 1) {
-            entry.version = Object.keys(entry['versions'])[0];
+          if (size(entry.versions) === 1) {
+            entry.version = Object.keys(entry.versions)[0];
             delete entry.versions;
           }
         }
@@ -127,10 +127,18 @@ export default {
       else if (uri.startsWith('https://api.stacspec.org/')) {
         type = 'STAC';
 
-        let match = uri.match(/^https?:\/\/api\.stacspec\.org\/([^/]+)\/([^/#]+)(?:#(.+))?$/);
+        // Handles the following extension URI formats:
+        // https://api.stacspec.org/VERSION/TYPE/extensions/SUBTYPE 
+        // https://api.stacspec.org/VERSION/TYPE#SUBTYPE
+        const match = uri.match(/^https?:\/\/api\.stacspec\.org\/([^/]+)\/([^/#]+)(?:(?:#|\/extensions\/)(.+))?$/);
         if (match) {
           version = match[1];
-          title = formatKey(match[2]);
+          if (match[2] === 'ogcapi-features') {
+            title = 'STAC / OGC API - Features';
+          }
+          else {
+            title = formatKey(match[2]);
+          }
           if (match[3]) {
             title += ' - ' + formatKey(match[3]);
           }
@@ -148,7 +156,7 @@ export default {
 
 #stac-browser .root-stats {
   h4 {
-    margin-top: $block-margin;
+    margin-top: var(--sb-block-gap);
   }
 
   .charts .chart {

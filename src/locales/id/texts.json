@@ -71,6 +71,7 @@
     "true": "ya"
   },
   "copy": "Salin",
+  "copyErrors": {},
   "default": "Default",
   "defaultWithValue": "Default ({value})",
   "deprecated": "Usang",
@@ -110,6 +111,7 @@
     "serverError": "Server mengalami masalah. @:errors.contactProvider",
     "unauthorized": "Permintaan tidak memiliki kredensial, misalnya token API. Silakan berikan kredensial Anda dan coba lagi."
   },
+  "exampleCode": {},
   "featureExperimental": "Fitur ini masih eksperimental dan mungkin memberikan hasil yang tidak terduga!",
   "features": {},
   "fullscreen": {
@@ -149,6 +151,7 @@
     "showFilter": "Tampilkan Filter"
   },
   "loading": "Memuat...",
+  "manage": {},
   "map": "Peta",
   "mapping": {
     "attribution": {},
@@ -183,6 +186,7 @@
     "previous": "‹ Sebelumnya"
   },
   "poweredBy": "Didukung oleh {link}",
+  "programming": {},
   "protocol": {
     "azure": "Microsoft Azure",
     "file": "sistem file (lokal)",
@@ -364,5 +368,6 @@
       "title": "Tampilkan sebagai kotak"
     },
     "title": "Opsi Tampilan"
-  }
+  },
+  "widgets": {}
 }

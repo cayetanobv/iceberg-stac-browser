@@ -27,7 +27,8 @@
     },
     "showOnMap": "Show on map",
     "showThumbnail": "Show thumbnail",
-    "shown": "shown"
+    "shown": "shown",
+    "formatHelp": "Learn about format conversion"
   },
   "authentication": {
     "button": {
@@ -55,6 +56,7 @@
     "user": "User"
   },
   "browse": "Browse",
+  "builtOn": "built on",
   "cancel": "Cancel",
   "catalog": {
     "license": "License",
@@ -70,7 +72,12 @@
     "false": "no",
     "true": "yes"
   },
+  "close": "Close",
   "copy": "Copy",
+  "copyErrors": {
+    "permission": "Unable to copy. Please check browser permissions.",
+    "unsupported": "Clipboard is not available in this browser."
+  },
   "default": "Default",
   "defaultWithValue": "Default ({value})",
   "deprecated": "Deprecated",
@@ -105,12 +112,18 @@
     "loadApiItemsFailed": "The API Items could not be loaded.",
     "loadFilteredItems": "Sorry, loading a filtered list of Items failed.",
     "loadItems": "Sorry, loading the list of STAC Items failed.",
+    "missingPermissions": "The credentials specified for this request do not have the required permissions.",
     "networkError": "This issue may occur when servers don't allow external access via web browsers (e.g., when CORS headers are not present). @:errors.contactProvider",
     "noExternalAccess": "Accessing external catalogs is not allowed!",
     "notFound": "The requested resource does not exist. @:errors.contactProvider",
     "serverError": "The server encountered an issue. @:errors.contactProvider",
     "title": "Error",
     "unauthorized": "The request lacks credentials, e.g. an API token. Please provide your credentials and try again."
+  },
+  "exampleCode": {
+    "title": "Example Code",
+    "storeAs": "Store code as:",
+    "installDependencies": "Install dependencies:"
   },
   "featureExperimental": "This feature is still experimental and may give unexpected results!",
   "features": {
@@ -143,20 +156,47 @@
     "api": "API",
     "catalog": "Static Catalog",
     "load": "Load",
+    "portolanRegistry": "Portolan registry",
+    "registryCollections": "{count} collection | {count} collections",
+    "registryCountsPartial": "{counts} so far",
+    "registryFeatures": "{count} feature | {count} features",
+    "registryLoading": "Loading the Portolan registry…",
+    "registryUnavailable": "Could not load the Portolan registry. You can still enter a catalog URL above.",
+    "selectFromRegistry": "... or select a catalog from the {registry}:",
+    "searchRegistry": "Search the registry by name or URL",
+    "searchRegistryNoMatch": "No registered catalog matches \"{query}\".",
     "selectStacIndex": "... or select one from {stacIndex}:",
-    "specifyCatalog": "Please specify a STAC Catalog or API...",
+    "specifyCatalog": "Please enter a Portolan catalog.json file",
     "urlInvalid": "The URL is invalid.",
     "urlMissingHost": "The URL is missing a host.",
     "urlMissingProtocol": "The URL is missing a protocol."
   },
   "items": {
     "filter": "Filters",
+    "filterChangesNotApplied": "The filters were changed, but the changes have not been applied yet.",
     "hideFilter": "Hide Filters",
     "noTime": "No time given",
     "noneAvailableForCollection": "No items available for this collection.",
     "showFilter": "Show Filters"
   },
   "loading": "Loading...",
+  "manage": {
+    "addCollection": "Add Collection",
+    "addItem": "Add Item",
+    "confirmDeleteTitle": "Confirm Deletion",
+    "confirmDeleteMessage": "Are you sure you want to delete this STAC resource?",
+    "create": "Create",
+    "delete": "Delete",
+    "discardDraft": "Discard restored changes",
+    "draftRestored": "Unsaved changes from a previous session were restored.",
+    "edit": "Edit",
+    "leavePage": "Leave page",
+    "save": "Save",
+    "noUndo": "This action cannot be undone.",
+    "unsavedChangesLeave": "You have unsaved changes. Do you really want to leave this page?",
+    "unsavedChangesTitle": "Unsaved Changes",
+    "validate": "Validate"
+  },
   "map": "Map",
   "mapping": {
     "attribution": {
@@ -184,6 +224,7 @@
     "layers": {
       "base": "Base Layers",
       "footprint": "Footprint",
+      "overflow": "{count} more layer(s) not shown",
       "title": "Layers",
       "unnamed": "Unnamed #{id}"
     },
@@ -192,6 +233,16 @@
     },
     "nobasemap": "No basemaps available.",
     "nodata": "No spatial information available in the metadata.",
+    "styles": {
+      "legend": "Legend",
+      "select": "Select map style"
+    },
+    "vectorFallback": {
+      "loadError": "Could not load the GeoParquet data for display.",
+      "reprojectionFailed": "None of the features could be placed on the map. The file declares {crs}, but its coordinates fall outside that system — the declared CRS may not match the data.",
+      "tooBig": "GeoParquet file is too large to load on the map ({size} MB, limit {maxSize} MB).",
+      "tooLarge": "GeoParquet data has {count} features — too many to show on the map directly (limit: {max})."
+    },
     "zoom": {
       "in": {
         "description": "Zoom in",
@@ -205,6 +256,7 @@
   },
   "messageForSchemaError": "{message}, for schema {schemaPath}",
   "metadata": {
+    "additional": "Additional Metadata",
     "general": "General",
     "title": "Metadata"
   },
@@ -224,6 +276,14 @@
     "previous": "‹ Previous"
   },
   "poweredBy": "Powered by {link}",
+  "programming": {
+    "csharp": "C#",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "python": "Python",
+    "r": "R",
+    "rust": "Rust"
+  },
   "protocol": {
     "azure": "Microsoft Azure",
     "file": "file system (local)",
@@ -272,6 +332,8 @@
     "between": "between",
     "betweenOperatorDescription": "Tests whether a numeric field value lies within the given range. The given range is inclusive.",
     "dateDescription": "All times in Coordinated Universal Time (UTC).",
+    "disabledDueToSingleDate": "This filter is disabled because the collection has a single date and time as temporal extent.",
+    "droppedFilters": "The following filters are not supported here and were removed: {filters}.",
     "enterCollections": "Enter one or more Collection IDs...",
     "enterItemIds": "Enter one or more Item IDs...",
     "enterSearchTerms": "Enter one or more search terms...",
@@ -348,6 +410,7 @@
       "switch": "Switch the language"
     },
     "locatedAt": "The STAC metadata file is located at:",
+    "manage": "Manage",
     "share": {
       "bsky": "Bluesky",
       "email": "E-mail",
@@ -399,6 +462,8 @@
   "stacCollection": "Collection | Collections",
   "stacItem": "Item | Items",
   "submit": "Submit",
+  "switchToDarkMode": "Switch to dark mode",
+  "switchToLightMode": "Switch to light mode",
   "table": {
     "emptyFilteredText": "There are no records matching your request",
     "emptyText": "There are no records to show",
@@ -423,5 +488,108 @@
       "title": "Show as tiles"
     },
     "title": "Display Options"
+  },
+  "widgets": {
+    "featured": "Featured"
+  },
+  "iceberg": {
+    "title": "Apache Iceberg table",
+    "serverless": "no catalog server",
+    "tabs": {
+      "connection": "Connection",
+      "schema": "Schema",
+      "snapshots": "Snapshots",
+      "code": "Code",
+      "query": "Query"
+    },
+    "fields": {
+      "catalogType": "Catalog type",
+      "catalogUri": "Catalog URI",
+      "restPrefix": "REST prefix",
+      "authorizationType": "Authorization",
+      "tableId": "Table identifier",
+      "metadataLocation": "Metadata location",
+      "asset": "Iceberg asset",
+      "formatVersion": "Format version",
+      "currentSnapshotId": "Current snapshot",
+      "partitionSpec": "Partitioned by",
+      "rowCount": "Rows"
+    },
+    "distribution": {
+      "only": "The Iceberg table is the only distribution of this data.",
+      "beside": "The Iceberg table reads the same files as the GeoParquet data asset of this collection.",
+      "noAsset": "The collection has no Iceberg asset. Connect through the catalog fields above."
+    },
+    "schema": {
+      "id": "ID",
+      "name": "Column",
+      "type": "Iceberg type",
+      "stacType": "STAC type",
+      "required": "required",
+      "primaryGeometry": "primary geometry",
+      "partition": "partition source",
+      "none": "The collection describes no columns."
+    },
+    "snapshots": {
+      "time": "Committed",
+      "id": "Snapshot",
+      "operation": "Operation",
+      "records": "Rows",
+      "files": "Files",
+      "current": "table current",
+      "pinned": "collection",
+      "query": "Query",
+      "none": "The table has no snapshots.",
+      "matches": "matches the table",
+      "differs": "differs from the table"
+    },
+    "code": {
+      "engines": "DuckDB, PyIceberg and BigQuery read the metadata file directly. Spark and Trino need a catalog server."
+    },
+    "query": {
+      "intro": "Query the table in your browser with DuckDB-WASM. The first start downloads about 10 MB.",
+      "start": "Start DuckDB",
+      "engine": "DuckDB {version}, running in your browser.",
+      "run": "Run",
+      "preview": "Preview rows",
+      "map": "Show {count} geometries",
+      "mapCount": "{count} geometries on the map, reprojected from {crs}.",
+      "took": "Query finished in {seconds} s.",
+      "resultInfo": "{rows} rows, {columns} columns"
+    },
+    "download": {
+      "result": "Download result (GeoParquet)",
+      "table": "Download table (GeoParquet)",
+      "progress": "Writing GeoParquet. A large table takes a while."
+    },
+    "auth": {
+      "title": "Authentication for a private bucket",
+      "token": "GCS bearer token",
+      "apply": "Apply",
+      "applied": "Token applied."
+    },
+    "notices": {
+      "staticWithoutLocation": "The catalog type is static, but iceberg:metadata_location is missing. A static catalog requires it.",
+      "numericSnapshotId": "iceberg:current_snapshot_id is a number. Extension v1.1.0 requires a string, because a JSON number loses precision above 2^53.",
+      "legacyPartitionSpec": "iceberg:partition_spec uses the v1.0.0 \"field\" key. Extension v1.1.0 uses \"name\".",
+      "legacyMediaType": "The Iceberg asset uses a pre-v1.1.0 media type. Use application/vnd.apache.iceberg+json.",
+      "objectStoreLocation": "iceberg:metadata_location uses an object-store URI. The browser reads it through the HTTPS endpoint of the bucket.",
+      "snapshotBehind": "The table moved on: the collection pins snapshot {stac}, the table is at {table}. The collection metadata is stale.",
+      "snapshotUnknown": "The collection pins snapshot {stac}, which the table does not list. The table is at {table}.",
+      "formatVersion": "The collection states format version {stac}, the table is version {table}.",
+      "geography": "The table has a geography column. DuckDB cannot read the geography type yet.",
+      "quotedCrs": "A geometry type quotes its CRS, as PyIceberg 0.12 writes it. DuckDB and Java readers then fail on the CRS.",
+      "rowCount": "table:row_count is {stac}, the current snapshot has {table} rows.",
+      "managedNoLocation": "The table lives in a {type} catalog and the collection gives no metadata file. Use the connection details to open it in a query engine.",
+      "notQueryable": "The collection gives no metadata file to read the table from."
+    },
+    "errors": {
+      "metadata": "Could not read the table metadata: {error}",
+      "start": "Could not start DuckDB: {error}",
+      "open": "DuckDB started, but could not open the table: {error}",
+      "crs": "Cannot reproject from {crs}.",
+      "forbidden": "Access denied. The bucket is private or the token expired.",
+      "network": "Network error, possibly a missing CORS header on the bucket: {error}"
+    }
   }
 }

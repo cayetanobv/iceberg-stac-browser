@@ -1,0 +1,740 @@
+import { describe, it, expect, vi } from 'vitest'
+import Collection from 'stac-js/src/collection.js'
+import { resolveStyles, extractLegend, extractStyleFields, loadStyleJson } from '../../src/utils/portolanStyles.js'
+
+const COLLECTION_URL = 'https://example.com/boundaries/nl/collection.json'
+
+describe('portolanStyles', () => {
+  describe('extractLegend', () => {
+    it('returns empty array for null style', () => {
+      expect(extractLegend(null)).toEqual([])
+    })
+
+    it('returns empty array when no layers', () => {
+      expect(extractLegend({})).toEqual([])
+      expect(extractLegend({ layers: [] })).toEqual([])
+    })
+
+    it('returns empty array when no fill layer', () => {
+      const style = {
+        layers: [{ type: 'line', paint: {} }]
+      }
+      expect(extractLegend(style)).toEqual([])
+    })
+
+    it('returns empty array for string fill-color', () => {
+      const style = {
+        layers: [{ type: 'fill', paint: { 'fill-color': '#ff0000' } }]
+      }
+      expect(extractLegend(style)).toEqual([])
+    })
+
+    it('parses step expression', () => {
+      const style = {
+        layers: [{
+          type: 'fill',
+          paint: {
+            'fill-color': [
+              'step',
+              ['get', 'value'],
+              '#ccc',      // default color
+              10, '#red',  // stop 1
+              20, '#blue', // stop 2
+              30, '#green' // stop 3
+            ]
+          }
+        }]
+      }
+      const legend = extractLegend(style)
+      expect(legend).toHaveLength(4)
+      expect(legend[0]).toEqual({ color: '#ccc', label: '< 10' })
+      expect(legend[1]).toEqual({ color: '#red', label: '10–20' })
+      expect(legend[2]).toEqual({ color: '#blue', label: '20–30' })
+      expect(legend[3]).toEqual({ color: '#green', label: '30+' })
+    })
+
+    it('parses match expression', () => {
+      const style = {
+        layers: [{
+          type: 'fill',
+          paint: {
+            'fill-color': [
+              'match',
+              ['get', 'category'],
+              'residential', '#ff0000',
+              'commercial', '#00ff00',
+              'industrial', '#0000ff',
+              '#cccccc' // fallback
+            ]
+          }
+        }]
+      }
+      const legend = extractLegend(style)
+      expect(legend).toHaveLength(3)
+      expect(legend[0]).toEqual({ color: '#ff0000', label: 'residential' })
+      expect(legend[1]).toEqual({ color: '#00ff00', label: 'commercial' })
+      expect(legend[2]).toEqual({ color: '#0000ff', label: 'industrial' })
+    })
+
+    // A Portolan style commonly switches ramps by zoom, because a tiled
+    // aggregate holds larger counts in its coarse cells than in its fine ones:
+    //   ["step", ["zoom"], <ramp for low zoom>, 3, <ramp for high zoom>]
+    // The wrapper is not itself a ramp. Reading it as one puts the inner
+    // expression arrays where the colors belong.
+    describe('a ramp that switches on zoom', () => {
+      const zoomSwitched = () => ({
+        layers: [{
+          type: 'fill',
+          paint: {
+            'fill-color': [
+              'step', ['zoom'],
+              ['step', ['coalesce', ['get', 'count'], 0], '#low0', 11, '#low1', 46, '#low2'],
+              3,
+              ['step', ['coalesce', ['get', 'count'], 0], '#high0', 3, '#high1', 11, '#high2'],
+            ],
+          },
+        }],
+      })
+
+      it('reads the ramp that applies at the given zoom', () => {
+        const legend = extractLegend(zoomSwitched(), 5)
+        expect(legend).toEqual([
+          { color: '#high0', label: '< 3' },
+          { color: '#high1', label: '3–11' },
+          { color: '#high2', label: '11+' },
+        ])
+      })
+
+      it('reads the first ramp below the first zoom stop', () => {
+        const legend = extractLegend(zoomSwitched(), 1)
+        expect(legend).toEqual([
+          { color: '#low0', label: '< 11' },
+          { color: '#low1', label: '11–46' },
+          { color: '#low2', label: '46+' },
+        ])
+      })
+
+      it('defaults to the lowest zoom band when no zoom is given', () => {
+        expect(extractLegend(zoomSwitched())[0]).toEqual({ color: '#low0', label: '< 11' })
+      })
+
+      it('never emits a non-string color', () => {
+        // The guard that keeps a nested expression out of the DOM, whatever
+        // shape a style arrives in.
+        const nested = {
+          layers: [{
+            type: 'fill',
+            paint: { 'fill-color': ['step', ['get', 'n'], ['get', 'oops'], 5, '#abc'] },
+          }],
+        }
+        expect(extractLegend(nested)).toEqual([])
+      })
+    })
+
+    // Above the fill layer's maxzoom the map draws the circle layer, so that
+    // is the layer the legend has to describe.
+    describe('choosing the layer the map draws', () => {
+      const fillThenCircle = () => ({
+        layers: [
+          {
+            id: 'cells', type: 'fill', maxzoom: 9,
+            paint: { 'fill-color': ['step', ['get', 'count'], '#f0', 10, '#f1'] },
+          },
+          {
+            id: 'points', type: 'circle', minzoom: 9,
+            paint: { 'circle-color': ['step', ['get', 'frp'], '#c0', 50, '#c1'] },
+          },
+        ],
+      })
+
+      it('reads the fill layer below its maxzoom', () => {
+        expect(extractLegend(fillThenCircle(), 4)[0]).toEqual({ color: '#f0', label: '< 10' })
+      })
+
+      it('reads the circle layer above the fill layer maxzoom', () => {
+        expect(extractLegend(fillThenCircle(), 11)[0]).toEqual({ color: '#c0', label: '< 50' })
+      })
+    })
+
+    it('handles numeric match values', () => {
+      const style = {
+        layers: [{
+          type: 'fill',
+          paint: {
+            'fill-color': [
+              'match',
+              ['get', 'code'],
+              1, '#red',
+              2, '#blue',
+              '#gray'
+            ]
+          }
+        }]
+      }
+      const legend = extractLegend(style)
+      expect(legend[0].label).toBe('1')
+      expect(legend[1].label).toBe('2')
+    })
+  })
+
+  describe('resolveStyles', () => {
+    it('returns empty array when no styles property', () => {
+      const stac = { properties: {} }
+      expect(resolveStyles(stac)).toEqual([])
+    })
+
+    // Portolan core.md: styles are discovered by filtering collection assets
+    // on the `style` role, and the default among them carries a second
+    // `default` role. No `portolan:styles` manifest exists any more.
+    describe('style-role assets', () => {
+      // A real stac-js Collection — this is what MapView passes in production
+      // (the vuex store hydrates STAC JSON via src/models/stac.js), so these
+      // tests exercise the shipped path rather than a duck type.
+      const collection = (assets, extra = {}) => new Collection({
+        type: 'Collection',
+        stac_version: '1.0.0',
+        id: 'nl',
+        description: 'test',
+        license: 'proprietary',
+        extent: { spatial: { bbox: [[-180, -90, 180, 90]] }, temporal: { interval: [[null, null]] } },
+        links: [{ rel: 'self', href: COLLECTION_URL }],
+        assets,
+        ...extra,
+      }, COLLECTION_URL)
+
+      const styleAsset = (over = {}) => ({
+        type: 'application/vnd.mapbox.style+json',
+        roles: ['style'],
+        ...over,
+      })
+
+      it('discovers styles from assets with the style role', () => {
+        const stac = collection({
+          data: { href: './d.parquet', roles: ['data'] },
+          'style-categorical': styleAsset({ href: './styles/categorical.json', title: 'Categorical MapLibre style' }),
+          'style-labeled': styleAsset({ href: './styles/labeled.json', title: 'Labeled MapLibre style' }),
+        })
+        const result = resolveStyles(stac)
+        expect(result).toHaveLength(2)
+        expect(result[0]).toEqual({
+          name: 'style-categorical',
+          title: 'Categorical MapLibre style',
+          href: 'https://example.com/boundaries/nl/styles/categorical.json',
+        })
+        expect(result[1].href).toBe('https://example.com/boundaries/nl/styles/labeled.json')
+      })
+
+      // core.md: "when a collection provides more than one style, exactly one
+      // style asset MUST carry both `style` and `default` in its `roles`."
+      it('hoists the asset carrying the default role, whatever its position', () => {
+        const stac = collection({
+          'style-labeled': styleAsset({ href: './styles/labeled.json', title: 'Labeled' }),
+          'style-graduated': styleAsset({ href: './styles/graduated.json', title: 'Graduated' }),
+          'style-categorical': styleAsset({ href: './styles/categorical.json', title: 'Categorical', roles: ['style', 'default'] }),
+        })
+        expect(resolveStyles(stac).map(s => s.name)).toEqual([
+          'style-categorical', 'style-labeled', 'style-graduated',
+        ])
+      })
+
+      it('keeps a default-role asset first when it already is', () => {
+        const stac = collection({
+          'style-default': styleAsset({ href: './styles/default.json', title: 'Default', roles: ['style', 'default'] }),
+          'style-labeled': styleAsset({ href: './styles/labeled.json', title: 'Labeled' }),
+        })
+        expect(resolveStyles(stac).map(s => s.name)).toEqual(['style-default', 'style-labeled'])
+      })
+
+      // Keys deliberately in non-alphabetical order, so a stray sort on the
+      // entries would fail here rather than slip through.
+      it('falls back to document order when no asset carries the default role', () => {
+        const stac = collection({
+          'style-zoning': styleAsset({ href: './styles/zoning.json', title: 'Zoning' }),
+          'style-admin': styleAsset({ href: './styles/admin.json', title: 'Admin' }),
+        })
+        expect(resolveStyles(stac).map(s => s.name)).toEqual(['style-zoning', 'style-admin'])
+      })
+
+      it('ignores assets without the style role', () => {
+        const stac = collection({
+          visual: { href: './v.pmtiles', roles: ['visual'], type: 'application/vnd.pmtiles' },
+          thumbnail: { href: './t.png', roles: ['thumbnail'], type: 'image/png' },
+        })
+        expect(resolveStyles(stac)).toEqual([])
+      })
+
+      // Raster styling has no decided format, so a style-role asset of some
+      // other media type must not reach MapLibre.
+      it('ignores style-role assets of a non-MapLibre media type', () => {
+        const stac = collection({
+          'style-sld': { href: './styles/x.sld', roles: ['style'], type: 'application/vnd.ogc.sld+xml' },
+        })
+        expect(resolveStyles(stac)).toEqual([])
+      })
+
+      // Catalogs published before the media type was pinned type their styles
+      // application/json; the role is the normative signal.
+      it('accepts a style-role asset typed application/json', () => {
+        const stac = collection({
+          'style-main': { href: './styles/main.json', roles: ['style'], type: 'application/json' },
+        })
+        expect(resolveStyles(stac).map(s => s.href))
+          .toEqual(['https://example.com/boundaries/nl/styles/main.json'])
+      })
+
+      it('accepts a media type differing only in case', () => {
+        const stac = collection({
+          'style-main': { href: './styles/main.json', roles: ['style'], type: 'Application/VND.Mapbox.Style+JSON' },
+        })
+        expect(resolveStyles(stac)).toHaveLength(1)
+      })
+
+      it('accepts a style-role asset that declares no media type', () => {
+        const stac = collection({ 'style-main': { href: './styles/main.json', roles: ['style'] } })
+        expect(resolveStyles(stac)).toEqual([{
+          name: 'style-main',
+          title: 'style-main',
+          href: 'https://example.com/boundaries/nl/styles/main.json',
+        }])
+      })
+
+      it('ignores an asset whose roles is not an array', () => {
+        const stac = collection({ 'style-main': { href: './styles/main.json', roles: 'style' } })
+        expect(resolveStyles(stac)).toEqual([])
+      })
+
+      it('falls back to the asset key, minus the styles/ prefix, when untitled', () => {
+        const stac = collection({ 'styles/categorical': styleAsset({ href: './styles/categorical.json' }) })
+        expect(resolveStyles(stac)[0].title).toBe('categorical')
+      })
+
+      // Anchored strip: an unanchored replace would mangle this to basemap/dark.
+      it('only strips a leading styles/ from the key', () => {
+        const stac = collection({ 'basemap/styles/dark': styleAsset({ href: './styles/dark.json' }) })
+        expect(resolveStyles(stac)[0].title).toBe('basemap/styles/dark')
+      })
+
+      it('strips a common prefix across style-role asset titles', () => {
+        const stac = collection({
+          s1: styleAsset({ href: 's1.json', title: 'Land Use - Residential' }),
+          s2: styleAsset({ href: 's2.json', title: 'Land Use - Commercial' }),
+        })
+        expect(resolveStyles(stac).map(s => s.title)).toEqual(['Residential', 'Commercial'])
+      })
+
+      describe('malformed assets are skipped, not thrown on', () => {
+        it('skips a style asset with no href and keeps the rest', () => {
+          const stac = collection({
+            'style-broken': styleAsset({ title: 'Broken' }),
+            'style-ok': styleAsset({ href: './styles/ok.json', title: 'OK' }),
+          })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['style-ok'])
+        })
+
+        it('skips a style asset with a non-string type', () => {
+          const stac = collection({ 'style-main': { href: './styles/main.json', roles: ['style'], type: 123 } })
+          expect(() => resolveStyles(stac)).not.toThrow()
+          expect(resolveStyles(stac)).toEqual([])
+        })
+
+        it('does not throw on a non-string title', () => {
+          const stac = collection({
+            s1: styleAsset({ href: './styles/a.json', title: {} }),
+            s2: styleAsset({ href: './styles/b.json', title: 'B' }),
+          })
+          expect(() => resolveStyles(stac)).not.toThrow()
+          expect(resolveStyles(stac).map(s => s.title)).toEqual(['s1', 'B'])
+        })
+
+        // Hrefs come from untrusted catalog JSON and go straight to fetch().
+        it.each(['file:///etc/passwd', 'javascript:alert(1)', 'data:application/json,{}'])(
+          'drops a style href with the %s scheme',
+          href => {
+            expect(resolveStyles(collection({ 'style-main': styleAsset({ href }) }))).toEqual([])
+          },
+        )
+      })
+
+      describe('legacy portolan:styles manifest', () => {
+        // A half-migrated catalog: one style tagged as an asset, the others
+        // still only named in the manifest. Neither source may erase the other.
+        it('merges manifest entries the asset scan did not find', () => {
+          const stac = collection({
+            'styles/default': { href: './styles/default.json', roles: ['style'], type: 'application/json', title: 'Default' },
+            'styles/by-age': { href: './styles/by-age.json', title: 'By Age' },
+          }, { 'portolan:styles': ['styles/default', 'styles/by-age'] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/default', 'styles/by-age'])
+        })
+
+        // No asset carries the default role, so the manifest's curated order
+        // governs rather than asset document order.
+        it('lets the manifest order outrank document order', () => {
+          const stac = collection({
+            'styles/by-age': { href: './styles/by-age.json', roles: ['style'], type: 'application/json', title: 'By Age' },
+            'styles/default': { href: './styles/default.json', roles: ['style'], type: 'application/json', title: 'Default' },
+          }, { 'portolan:styles': ['styles/default', 'styles/by-age'] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/default', 'styles/by-age'])
+        })
+
+        it('lets the default role outrank the manifest order', () => {
+          const stac = collection({
+            'styles/by-age': { href: './styles/by-age.json', roles: ['style', 'default'], type: 'application/json', title: 'By Age' },
+            'styles/default': { href: './styles/default.json', roles: ['style'], type: 'application/json', title: 'Default' },
+          }, { 'portolan:styles': ['styles/default', 'styles/by-age'] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/by-age', 'styles/default'])
+        })
+
+        // Manifest order outranks document order, so a manifest-listed style
+        // leads even when the only spec-tagged asset is not in the manifest.
+        it('puts manifest-listed styles ahead of ones it does not list', () => {
+          const stac = collection({
+            legacy: { href: './styles/legacy.json', title: 'Legacy' },
+            'style-new': styleAsset({ href: './styles/new.json', title: 'New' }),
+          }, { 'portolan:styles': ['legacy'] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['legacy', 'style-new'])
+        })
+
+        // The shape published by portolan-nl: every style declared twice, as a
+        // style-role asset keyed "styles/<name>" and as a manifest object whose
+        // `name` is the bare "<name>". The two sources name the same style
+        // differently, so a name-only dedupe listed all three of them twice.
+        it('does not list a style twice when both forms declare it', () => {
+          const stac = collection({
+            'styles/default': { href: './styles/default.json', roles: ['style', 'default'], type: 'application/vnd.mapbox.style+json', title: 'Monuments — Default' },
+            'styles/by-category': { href: './styles/by-category.json', roles: ['style'], type: 'application/vnd.mapbox.style+json', title: 'Monuments — By Category' },
+            'styles/by-type': { href: './styles/by-type.json', roles: ['style'], type: 'application/vnd.mapbox.style+json', title: 'Monuments — Built vs Archaeological' },
+          }, { 'portolan:styles': [
+            { name: 'default', href: './styles/default.json' },
+            { name: 'by-category', href: './styles/by-category.json' },
+            { name: 'by-type', href: './styles/by-type.json' },
+          ] })
+          const styles = resolveStyles(stac)
+          expect(styles.map(s => s.name))
+            .toEqual(['styles/default', 'styles/by-category', 'styles/by-type'])
+          expect(styles.map(s => s.title))
+            .toEqual(['Default', 'By Category', 'Built vs Archaeological'])
+        })
+
+        // Same duplication, but the manifest curates a different order than the
+        // assets appear in. Ranking is by href, so it still reaches the
+        // surviving asset-named records.
+        it('applies manifest order across the two declaration forms', () => {
+          const stac = collection({
+            'styles/by-type': { href: './styles/by-type.json', roles: ['style'], type: 'application/json', title: 'By Type' },
+            'styles/default': { href: './styles/default.json', roles: ['style'], type: 'application/json', title: 'Default' },
+          }, { 'portolan:styles': [
+            { name: 'default', href: './styles/default.json' },
+            { name: 'by-type', href: './styles/by-type.json' },
+          ] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/default', 'styles/by-type'])
+        })
+
+        // The two hrefs need only differ by a query string for a URL-equality
+        // dedupe to miss them, and a publisher adding a cache-buster to an
+        // asset is routine. The manifest still names the asset, so match on
+        // that too.
+        it('dedupes when the two hrefs differ only by a query string', () => {
+          const stac = collection({
+            'styles/default': { href: './styles/default.json?v=2', roles: ['style'], type: 'application/json', title: 'Default' },
+          }, { 'portolan:styles': [
+            { name: 'default', href: './styles/default.json' },
+          ] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/default'])
+        })
+
+        // First mention wins, so a manifest that names a style twice does not
+        // silently reorder everything listed after it.
+        it('ranks a style by its first mention when the manifest repeats it', () => {
+          const stac = collection({
+            'styles/a': { href: './styles/a.json', roles: ['style'], type: 'application/json', title: 'A' },
+            'styles/b': { href: './styles/b.json', roles: ['style'], type: 'application/json', title: 'B' },
+          }, { 'portolan:styles': [
+            { name: 'b', href: './styles/b.json' },
+            { name: 'a', href: './styles/a.json' },
+            { name: 'b', href: './styles/b.json' },
+          ] })
+          expect(resolveStyles(stac).map(s => s.name)).toEqual(['styles/b', 'styles/a'])
+        })
+
+        // Unlisted styles keep their relative document order behind the
+        // manifest's — the sort is stable.
+        it('keeps document order among styles the manifest omits', () => {
+          const stac = collection({
+            'style-zoning': styleAsset({ href: './styles/zoning.json', title: 'Zoning' }),
+            'style-admin': styleAsset({ href: './styles/admin.json', title: 'Admin' }),
+            'style-listed': styleAsset({ href: './styles/listed.json', title: 'Listed' }),
+          }, { 'portolan:styles': ['style-listed'] })
+          expect(resolveStyles(stac).map(s => s.name))
+            .toEqual(['style-listed', 'style-zoning', 'style-admin'])
+        })
+      })
+
+      it('resolves hrefs relative when the collection has no self link', () => {
+        const stac = new Collection({
+          type: 'Collection',
+          stac_version: '1.0.0',
+          id: 'nl',
+          description: 'test',
+          license: 'proprietary',
+          extent: { spatial: { bbox: [[-180, -90, 180, 90]] }, temporal: { interval: [[null, null]] } },
+          links: [],
+          assets: { 'style-main': styleAsset({ href: 'styles/main.json' }) },
+        })
+        expect(resolveStyles(stac).map(s => s.href)).toEqual(['styles/main.json'])
+      })
+    })
+
+    it('returns empty array for null', () => {
+      expect(resolveStyles(null)).toEqual([])
+    })
+
+    it('returns empty array when styles is empty', () => {
+      const stac = { properties: { 'portolan:styles': [] } }
+      expect(resolveStyles(stac)).toEqual([])
+    })
+
+    it('resolves string entries from assets', () => {
+      const stac = {
+        properties: { 'portolan:styles': ['style1'] },
+        assets: {
+          style1: {
+            title: 'My Style',
+            href: 'styles/style1.json',
+            getAbsoluteUrl: () => 'https://example.com/styles/style1.json'
+          }
+        },
+        getAbsoluteUrl: () => 'https://example.com/'
+      }
+      const result = resolveStyles(stac)
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('style1')
+      expect(result[0].title).toBe('My Style')
+      expect(result[0].href).toBe('https://example.com/styles/style1.json')
+    })
+
+    it('skips missing asset references', () => {
+      const stac = {
+        properties: { 'portolan:styles': ['missing'] },
+        assets: {},
+        getAbsoluteUrl: () => 'https://example.com/'
+      }
+      expect(resolveStyles(stac)).toEqual([])
+    })
+
+    it('resolves object entries with href', () => {
+      const stac = {
+        properties: {
+          'portolan:styles': [{ name: 'custom', href: 'styles/custom.json' }]
+        },
+        assets: {},
+        getAbsoluteUrl: () => 'https://example.com/'
+      }
+      const result = resolveStyles(stac)
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('custom')
+      expect(result[0].href).toBe('https://example.com/styles/custom.json')
+    })
+
+    it('strips common prefix from multiple style titles', () => {
+      const stac = {
+        properties: { 'portolan:styles': ['s1', 's2'] },
+        assets: {
+          s1: { title: 'Land Use - Residential', href: 's1.json', getAbsoluteUrl: () => 's1.json' },
+          s2: { title: 'Land Use - Commercial', href: 's2.json', getAbsoluteUrl: () => 's2.json' }
+        },
+        getAbsoluteUrl: () => ''
+      }
+      const result = resolveStyles(stac)
+      expect(result).toHaveLength(2)
+      expect(result[0].title).toBe('Residential')
+      expect(result[1].title).toBe('Commercial')
+    })
+
+    it('reads from top-level portolan:styles if not in properties', () => {
+      const stac = {
+        'portolan:styles': ['topLevel'],
+        properties: {},
+        assets: {
+          topLevel: { title: 'Top Level', href: 'tl.json', getAbsoluteUrl: () => 'tl.json' }
+        },
+        getAbsoluteUrl: () => ''
+      }
+      const result = resolveStyles(stac)
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('topLevel')
+    })
+  })
+
+  // The attribute names a style reads decide which parquet columns the
+  // GeoParquet reader keeps, so a missed field means unstyled features.
+  describe('extractStyleFields', () => {
+    it('returns nothing for a style with no attribute expressions', () => {
+      expect(extractStyleFields(null)).toEqual([])
+      expect(extractStyleFields({})).toEqual([])
+      expect(extractStyleFields({
+        layers: [{ id: 'a', type: 'fill', paint: { 'fill-color': '#f00' } }],
+      })).toEqual([])
+    })
+
+    it('finds fields in paint, layout and filter, sorted and deduplicated', () => {
+      const style = {
+        layers: [
+          {
+            id: 'fill',
+            type: 'fill',
+            paint: { 'fill-color': ['match', ['get', 'naam'], 'Utrecht', '#f00', '#ccc'] },
+            filter: ['==', ['get', 'soort'], 'provincie'],
+          },
+          {
+            id: 'label',
+            type: 'symbol',
+            layout: { 'text-field': ['get', 'naam'] },
+          },
+        ],
+      }
+      expect(extractStyleFields(style)).toEqual(['naam', 'soort'])
+    })
+
+    it('finds fields nested deep inside expressions', () => {
+      const style = {
+        layers: [{
+          id: 'fill',
+          type: 'fill',
+          paint: {
+            'fill-color': ['step', ['get', 'inwoners'], '#eee', 100000, '#999'],
+            'fill-opacity': ['case', ['has', 'flagged'], 0.9, ['*', 0.1, ['get', 'ratio']]],
+          },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual(['flagged', 'inwoners', 'ratio'])
+    })
+
+    it('ignores the three-argument get, which indexes another object', () => {
+      const style = {
+        layers: [{
+          id: 'fill',
+          type: 'fill',
+          paint: { 'fill-color': ['get', 'red', ['literal', { red: '#f00' }]] },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual([])
+    })
+
+    it('does not mistake a literal string for a field name', () => {
+      const style = {
+        layers: [{
+          id: 'fill',
+          type: 'fill',
+          paint: { 'fill-color': ['match', ['get', 'naam'], 'get', '#f00', '#ccc'] },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual(['naam'])
+    })
+
+    // MapLibre expands "{naam}" to ["concat", ["get", "naam"]]. Seven of the
+    // published Portolan styles label exclusively this way, and missing it
+    // meant their parquet render carried no label column at all.
+    it('finds a field referenced only by a text-field token', () => {
+      const style = {
+        layers: [{
+          id: 'label',
+          type: 'symbol',
+          layout: { 'text-field': '{naam}', 'text-size': 11 },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual(['naam'])
+    })
+
+    it('finds every token interpolated into a longer label', () => {
+      const style = {
+        layers: [{
+          id: 'label',
+          type: 'symbol',
+          layout: { 'text-field': '{naam} ({code})' },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual(['code', 'naam'])
+    })
+
+    it('finds tokens in icon-image and in a format array section', () => {
+      const style = {
+        layers: [
+          { id: 'i', type: 'symbol', layout: { 'icon-image': '{soort}-marker' } },
+          { id: 'f', type: 'symbol', layout: { 'text-field': ['format', '{naam}', {}] } },
+        ],
+      }
+      expect(extractStyleFields(style)).toEqual(['naam', 'soort'])
+    })
+
+    it('combines a token label with expression-driven paint', () => {
+      // The real rijkswaterstaat/sluizen shape: paint reads one attribute by
+      // expression, the label reads another by token.
+      const style = {
+        layers: [{
+          id: 'sluizen',
+          type: 'symbol',
+          layout: { 'text-field': '{NAAM}' },
+          paint: { 'text-color': ['step', ['get', 'NR_KOLKEN'], '#eee', 2, '#f00'] },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual(['NAAM', 'NR_KOLKEN'])
+    })
+
+    it('ignores braces outside a token-bearing layout property', () => {
+      const style = {
+        layers: [{
+          id: 'fill',
+          type: 'fill',
+          layout: { 'symbol-placement': 'not-a-{token}' },
+          paint: { 'fill-color': '#f00' },
+        }],
+      }
+      expect(extractStyleFields(style)).toEqual([])
+    })
+
+    it('survives a style nested far deeper than the call stack allows', () => {
+      // The walk is iterative; a recursive one throws RangeError here.
+      let expression = ['get', 'naam']
+      for (let i = 0; i < 50000; i++) {expression = ['coalesce', expression]}
+      const style = { layers: [{ id: 'f', type: 'fill', paint: { 'fill-color': expression } }] }
+      expect(extractStyleFields(style)).toEqual(['naam'])
+    })
+  })
+
+  describe('loadStyleJson', () => {
+    it('fetches and validates style', async () => {
+      const mockStyle = { version: 8, layers: [] }
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockStyle)
+      })
+
+      const result = await loadStyleJson('https://example.com/style.json')
+      expect(result).toEqual(mockStyle)
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://example.com/style.json',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+    })
+
+    it('throws on HTTP error', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404
+      })
+
+      await expect(loadStyleJson('https://example.com/missing.json'))
+        .rejects.toThrow('Failed to fetch style: 404')
+    })
+
+    it('throws on invalid version', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ version: 7 })
+      })
+
+      await expect(loadStyleJson('https://example.com/old.json'))
+        .rejects.toThrow('Invalid Mapbox GL style (version !== 8)')
+    })
+  })
+})

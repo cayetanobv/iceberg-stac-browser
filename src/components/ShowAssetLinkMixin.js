@@ -1,20 +1,38 @@
-import { defineComponent } from 'vue';
 import Utils from '../utils';
 import { mapGetters, mapState } from 'vuex';
 import { stacBrowserSpecialHandling } from "../rels";
+import { orderedRenderLayers } from '../utils/renderOrder.js';
+import { resolveRenders } from '../utils/renders.js';
 
-export default defineComponent({
+const COG_MIME_TYPES = [
+  'image/tiff',
+  'image/tiff; application=geotiff',
+  'image/tiff; application=geotiff; profile=cloud-optimized',
+  'image/vnd.stac.geotiff',
+  'application/x-geotiff',
+];
+
+export default {
   data() {
     return {
       tabIds: {
         map: 'map',
-        thumbnails: 'thumbnails',
-        iceberg: 'iceberg'
+        thumbnails: 'thumbnails'
       },
       tab: null,
       shownOnMap: [],
-      selectedAssets: []
+      selectedAssets: [],
+      hasAutoSelected: false
     };
+  },
+  watch: {
+    assets: {
+      immediate: true,
+      handler(assets) {
+        if (this.hasAutoSelected || !assets || assets.length === 0) {return;}
+        this._autoSelectCogAsset(assets);
+      }
+    }
   },
   computed: {
     ...mapState(['showThumbnailsAsAssets']),
@@ -28,7 +46,7 @@ export default defineComponent({
       }
       let assets = this.data.getAssets();
       if (!this.showThumbnailsAsAssets) {
-        assets = assets.filter(asset => !this.thumbnails.includes(asset));
+        assets = assets.filter(asset => !this.isThumbnail(asset));
       }
       return assets;
     },
@@ -58,8 +76,29 @@ export default defineComponent({
     }
   },
   methods: {
+    isAssetEqual(a, b) {
+      if (!a?.isAsset || !b?.isAsset) {
+        return false;
+      }
+      if (a === b) {
+        return true;
+      }
+      if (a.getAbsoluteUrl() === b.getAbsoluteUrl()) {
+        return true;
+      }
+      if (a.isAlternate) {
+        return this.isAssetEqual(a.getContext(), b);
+      }
+      if (b.isAlternate) {
+        return this.isAssetEqual(a, b.getContext());
+      }
+      return false;
+    },
+    isThumbnail(asset) {
+      return this.thumbnails.some(t => this.isAssetEqual(t, asset));
+    },
     showAsset(asset) {
-      if (this.thumbnails.find(t => t.is(asset))) {
+      if (this.isThumbnail(asset)) {
         this.tab = this.tabIds.thumbnails;
       }
       else {
@@ -82,6 +121,25 @@ export default defineComponent({
       if (this.hasThumbnails) {
         this.tab = this.tabIds.thumbnails;
       }
+    },
+    _autoSelectCogAsset(assets) {
+      const cogAssets = assets.filter(asset => {
+        const type = asset.type || '';
+        return COG_MIME_TYPES.some(mt => type.includes(mt));
+      });
+      if (cogAssets.length === 0) {return;}
+
+      // A declared `portolan:render_order` answers the question this method
+      // guesses at, for several layers at once. Guess only where nothing was
+      // declared.
+      const declared = orderedRenderLayers(this.data, resolveRenders(this.data), cogAssets);
+      const visual = cogAssets.find(a =>
+        Array.isArray(a.roles) && a.roles.includes('visual')
+      );
+      this.selectedAssets = declared.length
+        ? declared.map(l => l.asset)
+        : [visual || cogAssets[0]];
+      this.hasAutoSelected = true;
     }
   }
-});
+};

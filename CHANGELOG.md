@@ -1,24 +1,265 @@
+<!-- Release headings are shortcut reference links (`## [5.0.0]`), the Keep a
+     Changelog convention. package.json disables this rule by name, but under
+     pnpm's strict layout that registers a second copy of the rule rather than
+     turning off the one remark-preset-lint-recommended already enabled, so the
+     disable never takes effect. This directive works by rule name instead. -->
+<!-- lint disable no-shortcut-reference-link -->
+
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to Portolan Browser are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+Portolan Browser is a fork of [STAC Browser](https://github.com/radiantearth/stac-browser) and versions
+independently of it. Entries above [Upstream STAC Browser History](#upstream-stac-browser-history) belong
+to this fork. The upstream history is kept below for reference, and its version numbers are upstream's.
+Portolan Browser 0.1.0 forked from upstream 5.1.0-dev.
+
+## [Unreleased][]
 
 ### Added
 
+- A search box on the start page filters the registry list. Every word of the query must appear
+  in the catalog title, its registry id, or its URL. The catalog URL field no longer filters the list
+- A categorical COG takes its colours from the `color_hint` values of its own `classification:classes`,
+  ahead of any colormap in a render, where every class carries a hint. The layer control lists the
+  class names as a legend, whichever rule supplies the colours
+- The `colormap` field of a render accepts the discrete object and interval-list forms the render
+  extension documents, besides the linear stops list read until now
+- `portolan:render_order` names the renders an item opens with, bottom first, so a chip
+  can show its true-colour imagery with a label mask drawn over it. The field is a
+  browser-side hint pending a proposal in portolan-spec (see [docs/layers.md](docs/layers.md))
+- An asset with three or more bands of statistics and no render of its own draws as a
+  true-colour composite stretched to those statistics, instead of near-black through the
+  default GPU path
+- A render whose `bidx` names three bands draws as a true-colour composite, stretching
+  each band by its own `rescale`, instead of ramping the first band through a colormap
+- The layer picker says how many raster assets it could not list, instead of quietly
+  showing a shorter list
+
+### Changed
+
+- A COG whose mask tiles sit beside its image tiles now paints in a fraction of the
+  requests. The map opens the COG itself and reads tile data through a source that
+  merges nearby reads into one HTTP range request. One screen of the Fields of the
+  World global beta raster cost 514 range requests and now costs 66, for the same bytes
+- The layer picker lists up to 16 raster assets, up from 8
+
+### Fixed
+
+- A raster layer no longer paints over the map controls: the layer picker, the style
+  picker and the map notices stayed clickable but became invisible behind an enabled COG
+- Band statistics are read from `raster:bands` as well as `bands`, so a raster-extension
+  1.x catalog gets a rescale stretched to its real values instead of a flat block of colour
+- An asset only inherits the item's first render when its band metadata describes a
+  single band, so a multi-band scene no longer draws as a false-colour ramp of its red
+  band
+- The render tile loaders hand deck.gl's decoder worker pool to the tile fetch and stop
+  after a cancelled fetch, so a colormapped or composited COG no longer decodes on the
+  main thread or colours tiles that left the viewport
+- A render whose `bidx` names a band the COG does not have draws nothing, instead of
+  reading the neighbouring pixel's samples as that band
+- Hiding a raster layer and showing it again no longer fails with `deck.gl: assertion
+  failed`. The map hands deck.gl a new layer instance each time instead of the one it
+  had already finalized
+- Without a declared `portolan:render_order`, one-band and classified rasters draw above
+  the pictures on the item, so a label mask turned on is no longer hidden under a scene
+  listed after it
+- Styles declared on an item now render. A partitioned collection publishes one
+  visual derivative and one style per partition, so those styles are assets of
+  the item. The map read styles from a collection only, so an item drew in the
+  default paint color.
+- The legend now reads a ramp that switches on zoom. A style selects between
+  whole ramps with `["step", ["zoom"], ...]`, because a tiled aggregate holds
+  larger counts in its coarse cells than in its fine ones. The legend read the
+  wrapper as a ramp, so it put expression arrays where the colors belong and
+  drew empty swatches. It now reads the ramp that applies at the map zoom, and
+  it follows the map when the zoom changes. It also describes a circle layer,
+  which is what a style draws above the fill layer maximum zoom.
+
+## [0.1.0][] - 2026-08-31
+
+First release of the Portolan fork, and the reference implementation for
+[Portolan 0.1](https://github.com/portolan-sdi/portolan-spec).
+
+### Fork Highlights
+
+These are the differences from upstream STAC Browser, accumulated since the fork.
+
+- Collection MapLibre GL styles carried as `style`-role assets are discovered and applied, with a style
+  picker and legend when a collection ships more than one
+- GeoParquet assets are read in the browser with hyparquet and drawn on the map without a tile server,
+  including reprojection to lon/lat for files in a projected CRS
+- A data preview panel lists GeoParquet rows with a per-column filter
+- COG assets decode client-side through deck.gl-geotiff in a Web Worker, and the STAC `render` extension
+  supplies colormap, rescale, and nodata values as switchable named styles
+- The start page is built from the Portolan registry rather than a list held in this repository
+- MapLibre GL replaces OpenLayers as the mapping library, so publisher styles, PMTiles archives, and
+  deck.gl layers all run on one renderer. Basemaps are MapLibre style documents
+- The map expands in place instead of entering fullscreen
+
+### Detailed Changes
+
+The sections below list every change since upstream 5.0.0. Some arrived through upstream syncs rather
+than fork work.
+
+#### Added
+
+- The catalog list on the start page is pulled from the [Portolan registry](https://github.com/portolan-sdi/portolan-registry), configurable via the new `registryUrl` option
+- Catalogs on the start page show the publisher's logo where the registry has one
+- Search filters are now preserved for collection and item searches
+- Opening a collection from the collection search results carries the search criteria over into its item filters
+- An indicator on the item filter toggle shows when the filters were changed but not applied yet
+- Added basic support for the STAC API extensions Transactions (for Items) and Collection Transactions, including validation
+  - Adds three new config options: `transactions`, `transactionsRequireLogin` and `transactionsRequirePreflight`
+  - Support for external management UIs via `create-form` and `edit-form` links ([RFC 6861](https://www.rfc-editor.org/rfc/rfc6861.html)) in the "Manage" menu
+
+#### Changed
+
+- The catalog list on the start page names the Portolan registry and links to it
+
+#### Removed
+
+- The "Static Catalog" badge on the start page; only API entries carry a badge now
+- The host line under each catalog on the start page, which repeated the same host down the whole list
+
+#### Fixed
+
+- Basemap place and street labels draw above collection data, and basemap buildings draw below it
+- Collapsible section headers follow the theme palette instead of hardcoded colours, so a rebrand reaches them
+- The map style picker lists each style once when a collection declares it both as an asset and in a `portolan:styles` manifest
+- The GeoParquet data preview no longer freezes the tab on a wide table: rendering is paginated within a fixed cell budget and filtering is debounced
+- The Search page restores the previous results when returning to it
+
+## Upstream STAC Browser History
+
+Everything below is the changelog of [STAC Browser](https://github.com/radiantearth/stac-browser), the
+project this fork is based on. These version numbers are upstream's, not Portolan Browser's.
+
+## [5.0.0] - 2026-07-31
+
+### Added
+
+- New Widget: `Featured`
+- Allow widgets to be shown conditionally
+- Added `relationTypes.config.js` to allow configuring link relation types that
+  - are specifically STAC and should be used to navigate to and display in STAC Browser
+  - should be hidden
+
+### Changed
+
+- Renamed SCSS variable `$logo-image-height` to `$logo-height` and CSS variable `--sb-logo-max-height` to `--sb-logo-height`
+- Added SCSS variable `$header-background` to allow overriding the gradient background of the header via SCSS as well
+- `buildTileUrlTemplate` can return `null` to not pass an asset to the tile server and use client-side rendering or no rendering at all
+
+### Fixed
+
+- URLs that were entered with a "wrong" trailing slash (e.g. `.../v1` although the server reports `.../v1/` as its URL) are corrected based on the self link of the server response and redirected.
+- Widgets that provide a custom `component` without an `id` render correctly; widget definitions with neither are skipped with an error
+- Use the Bootstrap z-index values to avoid overlay issues with the sticky header
+- Fix logo size calculation, avoiding the site title wrapping into multiple lines
+- Share button correctly shows with rounded borders on the right side
+- Web-Optimized GeoZarr assets have "Show on Map" button
+- The item filter panel reacts to programmatic open/close after the page has loaded
+
+## [5.0.0-rc.2] - 2026-06-23
+
+### Added
+
+- The Browse menu also loads additional Collections on demand
+- Minimal Docker build test and CI workflow.
+- Docker: `pathPrefix` can be set at container startup via `SB_pathPrefix` when `DYNAMIC_CONFIG` is enabled (default)
+
+### Changed
+
+- `getBrowserPath` for STAC Objects is not available any longer, use `toBrowserPath` or other URL comparison mechanisms instead.
+  **Note:** This is commonly used in `preprocessSTAC` config option, ensure to update your `config.js`.
+- Internal rewrite of how API children are maintained
+- Loaded collections are cached and no longer re-fetched when returning to a page
+- Header stays at the top by default and has a different design. You can disable the sticky header in the `variables.scss` by setting `$header-position` to `static`.
+
+### Fixed
+
+- Alternate assets are considered as thumbnail and preview candidates if the original asset can't be shown in a browser
+- Redirect bare `pathPrefix` URLs to their trailing-slash form in the Docker/nginx image (e.g. `/browser` → `/browser/`)
+- Geometries that cross the antimeridian are split into multi-geometries so that footprints render correctly on the map
+- Fix global error handling in certain edge-cases
+- Improve speed of catalog/collection duplicate detection
+- Fix search link detection
+- The configured default collection and item sort is also applied to the Browse menu
+- More requests that fail due to missing authentication are retried after login (incl. searches and downloads)
+- A failed background load no longer switches the page after login
+
+## [5.0.0-rc.1] - 2026-06-27
+
+### Added
+- Adding `extent`s to the root catalog will restrict the Search filters
+- Support free-text search for Collections in list of collections
+- Add a link to Collection Search from the Collections overview page for advanced filters
+- New locales:
+  - Swedish
+  - Russian
+- New config options:
+  - `catalogTitleAfterImage`: Set a different title in the header after a logo.
+  - `defaultCollectionSort`: Default sort order for Collections (replaces `cardViewSort`). The new default is different from the old default behaviour.
+  - `defaultItemSort`: Default sort order for Items (replaces `cardViewSort`). The new default is different from the old default behaviour.
+  - `preferredAssets`: Configure which (alternate) asset is shown by default. Defaults to preferring HTTP(S) alternates; set to `false` to revert back to the previous behaviour.
+
+### Changed
+
+- Only show language chooser when more than one locale is available
+- Restrict Collection item search date picker to collection's temporal extent
+- Focus temporal extent filter for Collection item search on end of temporal extent
+- Disable temporal extent filter when a single date/time is provided as temporal extent in the Collection metadata
+- Better default STAC title detection within not fully loaded lists where only a URL is available
+- No search / sort functionality available when a static catalog has only a subset of children loaded
+- The default value for `catalogTitle` is `null` instead of `STAC Browser`.
+- Improved how the title is handled
+
+### Removed
+
+- Removed `cardViewSort` config option in favor of `defaultCollectionSort` and `defaultItemSort`
+
+### Fixed
+
+- Link color on data source list selection improved
+- Improve the background color for dark mode on the map text controls.
+- Improve the map control background colors on dark mode.
+- CQL2 text representation of array operators (`a_overlaps`, `a_contains`, `a_equals`, `a_contained_by`) now uses function-call syntax as defined by the CQL2 text grammar
+- Fix loading the root route when a `catalogUrl` is set
+- Fix that in some cases the `catalogUrl` is lost
+
+## [5.0.0-beta.1] - 2026-05-12
+
+**THIS IS A BREAKING RELEASE - MAKE SURE TO UPDATE ALL YOUR CONFIG FILES!**
+
+### Added
+
+- Allow manually entering bounding boxes for search
+- Generate code examples for Global Item Search, Collection Search, and collection-scoped Item Search
 - Inputs to enter bounding boxes for search manually
 - Plugin system for widgets
 - Support for Sortables
 - Support `SB_CONFIG` for loading a custom config module
+  - Expose `SB_CONFIG` as a Docker build argument
 - Support Vite `loadEnv` for `.env` config overrides
 - CQL2 / Queryables:
   - Allow negating CQL2 filters (globally and per filter)
   - Support CQL2 Advanced Comparison Operators
   - Support CQL2 Array Functions
+- Ignored metadata fields can be configured in `fields.config.js`
 - PlayWright tests
+- Add config option `displayOverviewsForChildren` to toggle visualizing overviews for maps showing many STAC Items
+- Render GeoParquet files in a projected CRS by reprojecting them to lon/lat, using the PROJJSON definition in the file's own GeoParquet metadata. Positions outside the projection's input domain, or far outside the CRS's declared area of use, are dropped along with their feature and reported rather than drawn in the wrong place; a file that identifies a CRS but supplies no usable definition is refused outright.
+- Apply a collection's MapLibre styles to GeoParquet assets rendered directly on the map, not just to its tiled assets. Only the attribute columns the styles reference are read from the file.
+- Color modes:
+  - Support for dark mode (defaults to auto-detection based on system settings of the user)
+  - Added `enforcedColorMode` config option to enforce a specific color mode (e.g. always show "light" mode)
+  - Added a color mode switch in the header (next to the language chooser)
+  - Portolan pins `enforcedColorMode` to `light` for now: the MapLibre map stack does not follow the color mode yet
+- Added more documentation around styling
 
 ### Changed
 
@@ -30,29 +271,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The config.js file needs to be updated, replace `module.exports =` with `export default`.
 - The main HTML file (`public/index.html`) has moved to `index.html` and has various changes. Make sure to check any changes you made.
 - The runtime config file (`public/config.js`) has been renamed to `public/runtime-config.js`
+- Replaced `v-clipboard` with `@vueuse/core` clipboard support
 - All link and asset actions must be updated, similarly also check all the config files for changes:
   - `i18n.t` must be replaced with `i18n.global.t`
   - You may also have to update imports of `Utils` or other constants.
     Most imports have moved to stac-js.
     For example, `Utils.isObject` is now `isObject` and can be imported from `stac-js/src/utils.js`.
 - It is not needed any longer to update the path to the `runtime-config.js`, the `pathPrefix` is added automatically in the build process.
-
-### Deprecated
-
+- User stay logged in across sessions (for OpenID Connect only)
+- CSS declarations have been updated to reuse existing variables in favor of hardcoding certain colors etc.
+- `configureBasemap` accepts an additional parameter, the VueX Store (e.g. for different basemaps depending on the color mode).
 
 ### Removed
 
 - CLI parameters for npm commands (e.g. `npm run build -- --catalogUrl="https://example.com"`) as they are not supported by Vite. Make sure to check your CI scripts and Docker files.
+- Support for customizing `authConfig` through the root catalog has been removed. Use the STAC Authentication extension instead.
 
 ### Fixed
 
+- Discover MapLibre styles from assets carrying the `style` role, as Portolan's spec defines, instead of a `portolan:styles` manifest the spec no longer defines. The default style is the asset that also carries the `default` role, falling back to a `portolan:styles` manifest's order and then to asset document order for catalogs published before that rule; manifest entries the asset scan misses are still merged in, so half-migrated catalogs keep all their styles
 - Handle state of downloads better and confirm leaving the page when downloading
 - Better error on request to the `/collections` or `.../items` endpoints
 - Collection list on Global Item Search was empty in certain situations
 - Show an error message when no operator is supported for a queryable
 - Don't show an "unsupported" error when only Collection Search is supported by the API
+- Remove download button for ZARR assets
+- Fixed authentication for assets when authentication methods is not configured in STAC Browser
 
-## [4.0.1] - 2026-02-11
+## [4.0.1][] - 2026-02-11
 
 - Added a config option `footerLinks` to add links to the footer (e.g. imprint, privacy policy, etc.)
 - Alphabetical sorting of badges
@@ -65,7 +311,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Small UI improvements (e.g. icons, spacing)
 - Updated dependencies and translations
 
-## [4.0.0] - 2025-12-15
+## [4.0.0][] - 2025-12-15
 
 **THIS IS A BREAKING RELEASE - MAKE SURE TO UPDATE ALL YOUR CONFIG FILES!**
 
@@ -119,12 +365,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix the default basemap config
   - Show only storage schemes that actually apply
 
-## [3.3.5] - 2025-07-05
+## [3.3.5][] - 2025-07-05
 
 For releases prior to v4.0.0, please refer to the
 [release notes in the GitHub Releases](https://github.com/radiantearth/stac-browser/releases).
 
-[Unreleased]: https://github.com/radiantearth/stac-browser/compare/v4.0.1...HEAD
+[Unreleased]: https://github.com/portolan-sdi/portolan-browser/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/portolan-sdi/portolan-browser/releases/tag/v0.1.0
+[5.0.0]: https://github.com/radiantearth/stac-browser/compare/v5.0.0-rc.2...v5.0.0
+[5.0.0-rc.2]: https://github.com/radiantearth/stac-browser/compare/v5.0.0-rc.1...v5.0.0-rc.2
+[5.0.0-rc.1]: https://github.com/radiantearth/stac-browser/compare/v5.0.0-beta.1...v5.0.0-rc.1
+[5.0.0-beta.1]: https://github.com/radiantearth/stac-browser/compare/v4.0.1...v5.0.0-beta.1
 [4.0.1]: https://github.com/radiantearth/stac-browser/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/radiantearth/stac-browser/compare/v3.3.5...v4.0.0
 [3.3.5]: https://github.com/radiantearth/stac-browser/releases/tag/v3.3.5

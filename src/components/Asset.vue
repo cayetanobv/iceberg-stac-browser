@@ -23,17 +23,20 @@
           <b-badge v-for="role in sortedRoles" :key="role" :variant="role === 'data' ? 'primary' : 'secondary'" class="role" :title="displayRole(role)">{{ displayRole(role) }}</b-badge>
         </template>
         <b-badge v-if="shortFileFormat" variant="dark" class="format" :title="fileFormat"><span v-html="shortFileFormat" /></b-badge>
+        <a v-if="formatHelpLink" :href="formatHelpLink" target="_blank" rel="noopener noreferrer" class="format-help ms-1" :title="$t('assets.formatHelp')">
+          <b-icon-info-circle />
+        </a>
       </div>
     </template>
    
     <template v-if="hasAlternatives">
       <b-card no-body class="border-0 rounded-0">
-        <b-tabs lazy card>
-          <b-tab :title="asset['alternate:name'] || $t('assets.alternate.main')" active no-body>
-            <AssetAlternative :asset="asset" :shown="shown" hasAlternatives @show="show" />
+        <b-tabs v-model="activeTab" lazy card>
+          <b-tab :id="mainTabId" :title="asset['alternate:name'] || $t('assets.alternate.main')" no-body>
+            <AssetAlternative :asset="asset" :shown="shown" @show="show" />
           </b-tab>
-          <b-tab v-for="(altAsset, key) in alternatives" :title="altAsset['alternate:name'] || key" :key="key" no-body>
-            <AssetAlternative :asset="altAsset" :shown="shown" hasAlternatives @show="show" />
+          <b-tab v-for="(altAsset, key) in alternatives" :id="getAlternativeTabId(key)" :title="altAsset['alternate:name'] || key" :key="key" no-body>
+            <AssetAlternative :asset="altAsset" :shown="shown" @show="show" />
           </b-tab>
         </b-tabs>
       </b-card>
@@ -83,11 +86,12 @@ export default {
   emits: ['show'],
   data() {
     return {
-      expanded: false
+      expanded: false,
+      activeTab: null
     };
   },
   computed: {
-    ...mapState(['stateQueryParameters']),
+    ...mapState(['stateQueryParameters', 'preferredAssets']),
     type() {
       return this.definition ? 'itemdef' : 'asset';
     },
@@ -96,6 +100,9 @@ export default {
     },
     title() {
       return this.asset.title || this.asset.getKey();
+    },
+    mainTabId() {
+      return `${this.uid}-main`;
     },
     fileFormat() {
       if (typeof this.asset.type === "string" && this.asset.type.length > 0) {
@@ -138,6 +145,62 @@ export default {
         }
         return a.toLowerCase().localeCompare(b.toLowerCase(), undefined, { sensitivity: 'base' });
       });
+    },
+    formatHelpLink() {
+      const type = this.asset.type?.toLowerCase() || '';
+      if (type.includes('geoparquet') || type.includes('parquet')) {
+        return 'https://github.com/portolan-sdi/geoparquet-io';
+      }
+      if (type.includes('cloud-optimized') || type === 'image/tiff; application=geotiff; profile=cloud-optimized') {
+        return 'https://github.com/cogeotiff/rio-cogeo';
+      }
+      return null;
+    },
+    preferredTabId() {
+      if (!this.hasAlternatives) {
+        return this.mainTabId;
+      }
+
+      if (!this.preferredAssets) {
+        return this.mainTabId;
+      }
+
+      // If preferredAssets is a string, it's the key of the preferred asset
+      if (typeof this.preferredAssets === 'string') {
+        if (this.preferredAssets === this.asset.getKey()) {
+          return this.mainTabId;
+        }
+        if (Object.prototype.hasOwnProperty.call(this.alternatives, this.preferredAssets)) {
+          return this.getAlternativeTabId(this.preferredAssets);
+        }
+      }
+
+      // If preferredAssets is true, prefer HTTP(S) assets
+      if (this.preferredAssets === true) {
+        // Main asset has priority over alternatives
+        if (this.asset.isHTTP) {
+          return this.mainTabId;
+        }
+        
+        // Find first HTTP(S) alternative
+        const alternativeKeys = Object.keys(this.alternatives);
+        for (let i = 0; i < alternativeKeys.length; i++) {
+          const key = alternativeKeys[i];
+          if (this.alternatives[key].isHTTP) {
+            return this.getAlternativeTabId(key);
+          }
+        }
+      }
+
+      return this.mainTabId;
+    }
+  },
+  watch: {
+    preferredTabId: {
+      immediate: true,
+      handler(tabId) {
+        this.activeTab = tabId;
+      }
     }
   },
   created() {
@@ -154,6 +217,9 @@ export default {
     }
   },
   methods: {
+    getAlternativeTabId(key) {
+      return `${this.uid}-alt-${String(key).toLowerCase().replace(/[^\w]/g, '-')}`;
+    },
     displayRole(role) {
       let key = `assets.role.${role}`;
       if (this.$te(key)) {
@@ -184,6 +250,16 @@ export default {
     }
     .card {
       border: 0;
+    }
+  }
+
+  .format-help {
+    color: var(--bs-secondary);
+    font-size: 0.75em;
+    opacity: 0.7;
+    text-decoration: none;
+    &:hover {
+      opacity: 1;
     }
   }
 }

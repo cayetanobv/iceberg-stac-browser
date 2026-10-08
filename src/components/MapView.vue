@@ -1,10 +1,17 @@
 <template>
-  <div class="map-container">
+  <div class="map-container" :class="{ expanded: isExpanded }">
     <div ref="map" class="map" :id="mapId">
-      <!-- this will be filled by OpenLayers -->
-      <LayerControl :map="map" :maxZoom="maxZoom" />
-      <TextControl v-if="empty" :map="map" :text="$t('mapping.nodata')" />
-      <TextControl v-else-if="!hasBasemap" :map="map" :text="$t('mapping.nobasemap')" />
+      <LayerControl :map="map" :basemaps="basemaps" :activeBasemapIndex="activeBasemapIndex" :stacLayer="stacLayer" @switch-basemap="switchBasemap" />
+      <TerrainControl :is3D="is3D" @toggle="toggle3D" />
+      <StylePicker
+        :styles="availableStyles"
+        :activeIndex="activeStyleIndex"
+        :legend="activeLegend"
+        @change="applyStyleAtIndex"
+      />
+      <TextControl v-if="empty" :text="$t('mapping.nodata')" />
+      <TextControl v-else-if="!hasBasemap" :text="$t('mapping.nobasemap')" />
+      <TextControl v-else-if="vectorNoticeText" :text="vectorNoticeText" />
     </div>
     <div ref="target" class="popover-target" />
     <b-popover
@@ -25,19 +32,23 @@
 </template>
 
 <script>
-import { defineAsyncComponent } from 'vue';
+import { defineAsyncComponent, markRaw } from 'vue';
 import MapMixin from './maps/MapMixin.js';
 import LayerControl from './maps/LayerControl.vue';
 import TextControl from './maps/TextControl.vue';
-import { mapGetters } from 'vuex';
-import Select from 'ol/interaction/Select';
-import StacLayer from 'ol-stac';
-import { getStacObjectsForEvent, getStyle } from 'ol-stac/util.js';
-import { STACReference } from 'stac-js';
-import MapUtils from './maps/mapUtils.js';
-import GeoJSON from 'ol/format/GeoJSON.js';
+import TerrainControl from './maps/TerrainControl.vue';
+import StylePicker from './maps/StylePicker.vue';
+import StacMapLayer from './maps/StacMapLayer.js';
+import { resolveStyles, loadStyleJson, extractLegend, extractStyleFields } from '../utils/portolanStyles.js';
+import { VECTOR_NOTICE_REPROJECTION, VECTOR_NOTICE_TOO_BIG, VECTOR_NOTICE_TOO_LARGE } from '../utils/parquetShared.js';
+import { createLonLatTransform } from '../utils/crs.js';
+import proj4 from 'proj4';
 
-const selectStyle = getStyle('#ff0000', 2, null);
+// Every style's fields are read for every feature, though only one style is
+// ever active. Past this many, say so — a collection with a thematic style per
+// attribute can quietly multiply what the GeoParquet reader downloads.
+const MAX_STYLE_FIELDS = 32;
+
 let mapId = 0;
 
 export default {
@@ -48,7 +59,9 @@ export default {
     Catalogs: defineAsyncComponent(() => import('../components/Catalogs.vue')),
     Items: defineAsyncComponent(() => import('../components/Items.vue')),
     LayerControl,
-    TextControl
+    TextControl,
+    TerrainControl,
+    StylePicker,
   },
   mixins: [
     MapMixin
@@ -73,193 +86,602 @@ export default {
     popover: {
       type: Boolean,
       default: false
+    },
+    hideFootprint: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['empty', 'changed'],
   data() {
     return {
       selection: null,
-      clickPosition: { x: 0, y: 0 },
+      stacLayer: null,
       empty: false,
-      selector: null,
+      isExpanded: false,
       mapId: `map-${++mapId}`,
+      availableStyles: [],
+      activeStyleIndex: 0,
+      activeLegend: [],
+      // Whether any style has been bound yet, so the default is not applied
+      // over a selection the user made while the assets were still loading.
+      styleApplied: false,
+      vectorNotice: null,
     };
   },
   computed: {
-    ...mapGetters(['getStac']),
     container() {
       if (this.isFullScreen) {
         return '#' + this.mapId;
       }
-      else {
-        return '#stac-browser';
-      }
+      return '#stac-browser';
     },
-    childrenOptions() {
-      return {
-        displayPreview: this.children && this.children.isItemCollection
-      };
-    }
+    vectorNoticeText() {
+      if (!this.vectorNotice) {return null;}
+      if (this.vectorNotice.reason === VECTOR_NOTICE_TOO_LARGE) {
+        return this.$t('mapping.vectorFallback.tooLarge', {
+          count: this.vectorNotice.totalRows.toLocaleString(),
+          max: this.vectorNotice.max.toLocaleString(),
+        });
+      }
+      if (this.vectorNotice.reason === VECTOR_NOTICE_TOO_BIG) {
+        const toMb = bytes => (bytes / (1024 * 1024)).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        return this.$t('mapping.vectorFallback.tooBig', {
+          size: toMb(this.vectorNotice.byteLength),
+          maxSize: toMb(this.vectorNotice.maxBytes),
+        });
+      }
+      if (this.vectorNotice.reason === VECTOR_NOTICE_REPROJECTION) {
+        return this.$t('mapping.vectorFallback.reprojectionFailed', {
+          crs: this.vectorNotice.crs || '',
+        });
+      }
+      return this.$t('mapping.vectorFallback.loadError');
+    },
   },
   watch: {
     async stac() {
       await this.showStacLayer();
     },
     async assets() {
-      if (!this.stacLayer) {
-        return;
+      if (!this.stacLayer) {return;}
+      if (this.assets && this.assets.length > 0) {
+        await this.stacLayer.setAssets(this.assets);
+      } else {
+        await this.stacLayer.autoLoadVisualAssets(this.stac);
       }
-      await this.stacLayer.setAssets(this.assets);
     },
-    async children() {
-      if (!this.stacLayer) {
-        return;
-      }
-      await this.stacLayer.setAssets(null, false);
-      await this.stacLayer.setChildren(this.children, this.childrenOptions, false);
-      await this.stacLayer.updateLayers();
-      this.fit();
+    children() {
+      if (!this.stacLayer) {return;}
+      this.stacLayer.setChildren(this.children);
+      this.stacLayer.fit();
     },
     empty(empty) {
       if (empty) {
         this.$emit('empty');
       }
     },
-    selection(selection) {
-      if (!selection && this.selector) {
-        this.selector.getFeatures().clear();
-      }
-    }
   },
   created() {
-    // This is created here and not in data() to avoid it being reactive
     this.stacLayer = null;
+    this._showingStacLayer = false;
   },
   async mounted() {
     await this.showStacLayer();
   },
+  beforeUnmount() {
+    if (this.stacLayer) {
+      this.stacLayer.remove();
+      this.stacLayer = null;
+    }
+    if (this.map) {
+      this.map.remove();
+      this.map = null;
+    }
+  },
   methods: {
     async showStacLayer() {
-      this.map = null;
-      this.stacLayer = null;
+      if (this._showingStacLayer) {return;}
+      this._showingStacLayer = true;
 
-      await this.createMap(this.$refs.map, this.stac, this.onfocusOnly);
+      try {
+        this.availableStyles = [];
+        this.activeStyleIndex = 0;
+        this.activeLegend = [];
+        this.styleApplied = false;
+        this.vectorNotice = null;
+        if (this.stacLayer) {
+          this.stacLayer.remove();
+          this.stacLayer = null;
+        }
+        if (this.map) {
+          this.map.remove();
+        }
+        this.map = null;
 
-      if (this.stac) {
-        await this.addStacLayer();
+        if (!this.$refs.map) {return;}
+
+        await this.createMap(this.$refs.map, this.stac, this.onfocusOnly);
+        this._addExpandControl();
+        // A style switches ramps and layers by zoom, so the legend describes
+        // whichever of them the map draws now. Bound per map: showStacLayer
+        // removes the map before it builds another, which takes the handler
+        // with it, and beforeUnmount does the same.
+        this.map.on('zoomend', this.refreshLegend);
+
+        if (this.stac) {
+          await this.addStacLayer();
+        }
+      } finally {
+        this._showingStacLayer = false;
       }
     },
+
     async addStacLayer() {
-      let options = Object.assign({}, this.stacLayerOptions, {
-        // Don't set the URL here, as it is already set in the STAC object and is read-only.
-        // url: this.stac.getAbsoluteUrl(),
-        data: this.stac,
-        children: this.children,
-        assets: this.assets || null,
-        displayWebMapLink: true,
-        disableMigration: true,
-        childrenOptions: this.childrenOptions
-      });
-      this.stacLayer = new StacLayer(options);
-      this.stacLayer.on('error', error => {
-        console.warn(error);
-        this.fit();
-      });
-      this.stacLayer.on('sourceready', this.fit);
-      this.stacLayer.on('layersready', () => {
-        this.empty = this.stacLayer.isEmpty();
-        this.$emit('changed', this.getShownData());
-      });
-      this.map.addLayer(this.stacLayer);
+      this.stacLayer = markRaw(new StacMapLayer(this.map, {
+        ...this.stacLayerOptions,
+        onVectorNotice: (notice) => { this.vectorNotice = notice; },
+      }));
+
+      this.stacLayer.setStac(this.stac);
+
+      if (this.children) {
+        this.stacLayer.setChildren(this.children);
+      }
+
+      if (this.hideFootprint) {
+        this.stacLayer.setFootprintVisible(false);
+      }
+
+      // Fit before awaiting the asset load: fit() only reads the STAC
+      // bounding box, which setStac made available synchronously above, so
+      // the map zooms to the footprint immediately instead of sitting at
+      // world view for the whole download (e.g. a multi-MB GeoParquet).
+      this.stacLayer.fit();
+
+      // A GeoParquet asset rendered directly is read with its attribute
+      // columns pruned, and the set to keep is whatever the styles reference;
+      // learning that after the read would mean downloading the file twice.
+      // Declaring the expectation synchronously — before any await — lets the
+      // reader wait for the field set rather than race it. Styles then load
+      // concurrently with the assets: only the parquet path waits, so a
+      // tile- or COG-backed collection never pays for a style fetch it will
+      // not consult, and a slow style host delays styling, never data.
+      this.stacLayer.expectStyleFields();
+      const stylesReady = this.loadStyles();
+
+      if (this.assets && this.assets.length > 0) {
+        await this.stacLayer.setAssets(this.assets);
+      } else {
+        await this.stacLayer.autoLoadVisualAssets(this.stac);
+      }
+
+      // isEmpty() reads asset-backed state (_cogList, _overlayLayerIds), so
+      // it must wait for the load above.
+      this.empty = this.stacLayer.isEmpty();
+
+      this.$emit('changed', this.getShownData());
 
       if (this.popover) {
-        this.selector = new Select({
-          multi: true,
-          style: selectStyle,
-          layers: (layer) => {
-            if (this.children) {
-              // For item selection
-              return false;
-            }
-            else {
-              // For feature selection
-              const stac = layer.get('stac');
-              return stac && stac.isAsset;
-            }
-          }
-        });
-        this.selector.on('select', (event) => {
-          // For feature selection
-          this.selection = null;
-          this.setTargetPosition(event.mapBrowserEvent);
-          const features = this.selector.getFeatures();
-          if (features.getLength() > 0) {
-            const writer = new GeoJSON();
-            this.selection = {
-              target: this.$refs.target,
-              type: 'features',
-              items: features.getArray().map(f => writer.writeFeatureObject(f))
-            };
-          }
-        });
-        this.map.addInteraction(this.selector);
-        this.map.on('singleclick', async (event) => {
-          // For item selection
-          this.selection = null;
-          if (this.children) {
-            this.setTargetPosition(event);
-            this.selector.getFeatures().clear();
-            const features = this.selector.getFeatures();
-            const container = this.stacLayer.getData();
-            const objects = await getStacObjectsForEvent(event, container, features, 5);
-            if (objects.length > 0) {
-              this.selection = {
-                target: this.$refs.target,
-                type: this.children.isCollectionCollection ? 'collections': 'items',
-                children: objects
-              };
-            }
-          }
-        });
-        this.map.on('change', () => this.selection = null);
-        this.map.on('movestart', () => this.selection = null);
+        this._setupClickInteraction();
+      }
+
+      await stylesReady;
+      // The picker is live for the whole asset load, so by now the user may
+      // already have chosen a style. Auto-applying the default here regardless
+      // would snap their selection back and repaint the map — apply it only if
+      // nothing has been applied yet. A style chosen mid-load is bound by the
+      // setAssets tail, which re-binds whatever is current once sources exist.
+      if (!this.styleApplied) {
+        await this.applyStyleAtIndex(0);
       }
     },
-    setTargetPosition(event) {
-      // The event doesn't contain a target element for the popover to attach to.
-      // Thus we move a hidden target element to the click position and attach the popover to it.
-      // See also https://github.com/bootstrap-vue/bootstrap-vue/issues/5285
-      this.$refs.target.style.left = event.pixel[0] + 'px';
-      this.$refs.target.style.top = event.pixel[1] + 'px';
+
+    // Resolve the entity's styles and fetch every style document, so the
+    // union of the attribute fields they read reaches the GeoParquet reader.
+    // A style that fails to fetch or parse is dropped rather than blocking the
+    // others.
+    async loadStyles() {
+      // Captured once: the component can be torn down, or moved to another
+      // STAC entity, while the style documents are in flight.
+      const layer = this.stacLayer;
+      try {
+        if (!this.stac || !layer) {return;}
+        // A style describes how to draw the data it sits beside, so it is read
+        // from whichever entity owns that data. core.md names the collection,
+        // and that stays the common case. A partitioned collection is the
+        // other one: each partition ships its own visual derivative, and the
+        // breaks that draw it are computed from that partition's own values,
+        // so the style belongs to the item and cannot live one level up.
+        //
+        // Nothing else is styled from here. A Catalog holds no data of its
+        // own, and a search map draws results from elsewhere, which is not
+        // what either entity's styles were authored for.
+        const type = this.stac.type;
+        if (type !== 'Collection' && type !== 'Feature') {return;}
+        let styles;
+        try {
+          styles = resolveStyles(this.stac);
+        } catch (error) {
+          // Malformed style metadata must cost this entity its styles, not
+          // reject out of showStacLayer, which has no catch.
+          console.warn('Failed to resolve styles:', error);
+          return;
+        }
+        if (styles.length === 0) {return;}
+
+        // allSettled rather than all: each task already swallows its own
+        // rejection, and saying so in the code keeps a later refactor from
+        // turning one 404 into zero styles.
+        await Promise.allSettled(styles.map(async entry => {
+          try {
+            // markRaw: the style document is handed straight to MapLibre, which
+            // has no use for a reactive proxy over every nested expression.
+            // eslint-disable-next-line require-atomic-updates -- entry is this callback's own parameter
+            entry._cached = markRaw(await loadStyleJson(entry.href));
+          } catch (err) {
+            console.warn('Failed to load style:', entry.name, err);
+          }
+        }));
+
+        if (layer !== this.stacLayer) {return;}
+
+        const loaded = styles.filter(entry => entry._cached);
+        if (loaded.length === 0) {return;}
+        this.availableStyles = loaded;
+
+        // The union across every style, though only one is ever active. Not
+        // truncated past the warning: dropping a field silently would paint
+        // the features it drives solid black under step/interpolate.
+        const fields = new Set();
+        for (const entry of loaded) {
+          for (const field of extractStyleFields(entry._cached)) {fields.add(field);}
+        }
+        if (fields.size > MAX_STYLE_FIELDS) {
+          console.warn(
+            `Styles reference ${fields.size} attribute columns; all are read from the GeoParquet asset for every feature`
+          );
+        }
+        layer.setStyleFields([...fields]);
+      } finally {
+        // However this returned — an unstyled entity, no styles, a resolve
+        // error, every fetch failing, an unexpected throw — a parquet read is
+        // waiting on the field set and must be released, or the data never
+        // renders at all. Idempotent, so the success path is unaffected.
+        layer?.releaseStyleFields();
+      }
     },
+
+    // `availableStyles` only ever holds entries loadStyles already fetched, so
+    // the document is in hand here and this does not await the network.
+    applyStyleAtIndex(index) {
+      const styleEntry = this.availableStyles[index];
+      if (!styleEntry?._cached || !this.stacLayer) {return;}
+      try {
+        this.stacLayer.applyGlStyle(styleEntry._cached, styleEntry.href);
+        this.activeStyleIndex = index;
+        this.activeLegend = extractLegend(styleEntry._cached, this.currentZoom());
+        this.styleApplied = true;
+      } catch (err) {
+        console.warn('Failed to apply style:', styleEntry.name, err);
+      }
+    },
+
+    // 0 rather than nothing when the map is gone: extractLegend needs a number,
+    // and the lowest zoom band is what a map shows before anyone moves it.
+    currentZoom() {
+      const zoom = this.map?.getZoom?.();
+      return typeof zoom === 'number' ? zoom : 0;
+    },
+
+    // Re-read the active style for the zoom the map is now at. Only the legend
+    // changes — MapLibre evaluates the zoom expressions itself, so the paint on
+    // the map is already right and must not be re-bound here.
+    refreshLegend() {
+      const styleEntry = this.availableStyles[this.activeStyleIndex];
+      if (!styleEntry?._cached) {return;}
+      this.activeLegend = extractLegend(styleEntry._cached, this.currentZoom());
+    },
+
+    async onBasemapChanged() {
+      if (this.stacLayer) {
+        await this.stacLayer.readdAfterStyleChange();
+      }
+    },
+
+    _setupClickInteraction() {
+      const childrenLayerIds = this.stacLayer.getChildrenLayerIds();
+      if (childrenLayerIds.length === 0) {return;}
+
+      for (const layerId of childrenLayerIds) {
+        this.map.on('mouseenter', layerId, () => {
+          this.map.getCanvas().style.cursor = 'pointer';
+        });
+        this.map.on('mouseleave', layerId, () => {
+          this.map.getCanvas().style.cursor = '';
+        });
+      }
+
+      this.map.on('click', (e) => {
+        this.selection = null;
+
+        const features = this.map.queryRenderedFeatures(e.point, {
+          layers: childrenLayerIds,
+        });
+
+        if (features.length === 0) {return;}
+
+        this.$refs.target.style.left = e.point.x + 'px';
+        this.$refs.target.style.top = e.point.y + 'px';
+
+        const items = this.children?.isItemCollection
+          ? this.children.features
+          : this.children?.collections;
+
+        if (!items) {return;}
+
+        const seen = new Set();
+        const matched = [];
+        for (const f of features) {
+          const idx = f.properties._stacIndex;
+          if (idx != null && !seen.has(idx) && items[idx]) {
+            seen.add(idx);
+            matched.push(items[idx]);
+            if (matched.length >= 5) {break;}
+          }
+        }
+
+        if (matched.length > 0) {
+          this.selection = {
+            target: this.$refs.target,
+            type: this.children.isCollectionCollection ? 'collections' : 'items',
+            children: matched,
+          };
+        }
+      });
+    },
+
+    _addExpandControl() {
+      if (!this.map) {return;}
+      const vm = this;
+      const ctrl = {
+        onAdd() {
+          const container = document.createElement('div');
+          container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.title = 'Expand map';
+          btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+          btn.style.display = 'flex';
+          btn.style.alignItems = 'center';
+          btn.style.justifyContent = 'center';
+          btn.addEventListener('click', () => vm.toggleExpand(btn));
+          container.appendChild(btn);
+          return container;
+        },
+        onRemove() {}
+      };
+      this.map.addControl(ctrl, 'top-right');
+    },
+
+    toggleExpand(btn) {
+      this.isExpanded = !this.isExpanded;
+      if (btn) {
+        btn.title = this.isExpanded ? 'Collapse map' : 'Expand map';
+        btn.innerHTML = this.isExpanded
+          ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
+          : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+      }
+      this.$nextTick(() => {
+        if (this.map) {
+          this.map.resize();
+        }
+      });
+    },
+
     fit() {
-      const extent = this.stacLayer.getExtent();
-      if (extent) {
-        // Update the sizes, otherwise the fit will not work properly and compute a wrong zoom level
-        this.map.updateSize();
-        this.map.getView().fit(extent, { padding: [50,50,50,50], maxZoom: this.maxZoom });
+      if (this.stacLayer) {
+        this.stacLayer.fit();
       }
     },
+
     resetSelection() {
       this.selection = null;
     },
+
     getShownData() {
-      if (!this.stacLayer) {
+      if (!this.stacLayer) {return null;}
+      return this.stacLayer.getVisibleStacReferences();
+    },
+
+    // `sourceDefinition` is the file's own PROJJSON when it carries one. It is
+    // preferred over the authority code for the same reasons the GeoParquet
+    // loader prefers it (see createLonLatTransform): it is self-contained, so
+    // it needs no network round-trip and it works for CRSs that have no
+    // resolvable code at all — including PROJJSON with no `id`, where
+    // `sourceCrs` is only a human-readable name and nothing else can place it.
+    async resolveExtent(bbox, sourceCrs, sourceDefinition = null) {
+      if (!this.map || !bbox || bbox.length !== 4) {return null;}
+
+      const fromCrs = sourceCrs || 'EPSG:4326';
+
+      if (fromCrs === 'EPSG:4326') {
+        return [[bbox[0], bbox[1]], [bbox[2], bbox[3]]];
+      }
+
+      if (sourceDefinition) {
+        const transform = createLonLatTransform(fromCrs, sourceDefinition);
+        if (transform) {
+          try {
+            return [transform.forward([bbox[0], bbox[1]]), transform.forward([bbox[2], bbox[3]])];
+          } catch (e) {
+            console.warn('CRS transform failed', e);
+            return null;
+          }
+        }
+      }
+
+      if (fromCrs !== 'EPSG:3857' && !proj4.defs(fromCrs)) {
+        const match = fromCrs.match(/^EPSG:(\d+)$/);
+        if (match) {
+          try {
+            const resp = await fetch(`https://epsg.io/${match[1]}.proj4`);
+            if (resp.ok) {
+              const proj4def = await resp.text();
+              proj4.defs(fromCrs, proj4def.trim());
+            }
+          } catch (e) {
+            console.warn('Failed to fetch CRS definition for', fromCrs, e);
+          }
+        }
+      }
+
+      try {
+        const sw = proj4(fromCrs, 'EPSG:4326', [bbox[0], bbox[1]]);
+        const ne = proj4(fromCrs, 'EPSG:4326', [bbox[2], bbox[3]]);
+        return [sw, ne];
+      } catch (e) {
+        console.warn('CRS transform failed', e);
         return null;
       }
-      return this.stacLayer.getLayers().getArray()
-        .filter(layer => MapUtils.isLayerVisible(layer))
-        .map(layer => layer.get('stac'))
-        .filter(stac => stac instanceof STACReference);
-    }
+    },
+
+    pulseExtent(bounds) {
+      if (!this.map || !bounds) {return;}
+
+      const sourceId = 'pulse-extent-' + Date.now();
+      const fillLayerId = sourceId + '-fill';
+      const lineLayerId = sourceId + '-line';
+
+      const sw = bounds[0];
+      const ne = bounds[1];
+
+      const width = Math.abs(ne[0] - sw[0]);
+      const height = Math.abs(ne[1] - sw[1]);
+      const zoom = this.map.getZoom();
+      const tooSmall = width < 0.001 && height < 0.001 && zoom > 10;
+
+      let geojson;
+      if (tooSmall) {
+        const center = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2];
+        geojson = {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: center },
+          properties: {},
+        };
+      } else {
+        geojson = {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [sw[0], sw[1]],
+              [ne[0], sw[1]],
+              [ne[0], ne[1]],
+              [sw[0], ne[1]],
+              [sw[0], sw[1]],
+            ]],
+          },
+          properties: {},
+        };
+      }
+
+      this.map.addSource(sourceId, { type: 'geojson', data: geojson });
+
+      if (tooSmall) {
+        this.map.addLayer({
+          id: fillLayerId,
+          type: 'circle',
+          source: sourceId,
+          paint: {
+            'circle-radius': 8,
+            'circle-color': 'rgba(255, 200, 0, 0.7)',
+            'circle-stroke-color': 'rgba(200, 150, 0, 0.8)',
+            'circle-stroke-width': 2,
+          },
+        });
+      } else {
+        this.map.addLayer({
+          id: fillLayerId,
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': 'rgba(255, 200, 0, 0.1)',
+          },
+        });
+        this.map.addLayer({
+          id: lineLayerId,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': 'rgba(255, 200, 0, 0.8)',
+            'line-width': 3,
+          },
+        });
+      }
+
+      const duration = 8000;
+      const start = Date.now();
+      const map = this.map;
+
+      const interval = setInterval(() => {
+        const elapsed = Date.now() - start;
+        if (elapsed >= duration || !map) {
+          clearInterval(interval);
+          try {
+            if (map.getLayer(fillLayerId)) {map.removeLayer(fillLayerId);}
+            if (map.getLayer(lineLayerId)) {map.removeLayer(lineLayerId);}
+            if (map.getSource(sourceId)) {map.removeSource(sourceId);}
+          } catch { /* map may be gone */ }
+          return;
+        }
+        const phase = (elapsed / 800) * Math.PI;
+        const pulse = 0.4 + 0.5 * Math.abs(Math.sin(phase));
+        try {
+          if (tooSmall) {
+            map.setPaintProperty(fillLayerId, 'circle-color', `rgba(255, 200, 0, ${pulse})`);
+            map.setPaintProperty(fillLayerId, 'circle-radius', 6 + 3 * Math.abs(Math.sin(phase)));
+          } else {
+            map.setPaintProperty(fillLayerId, 'fill-color', `rgba(255, 200, 0, ${pulse * 0.15})`);
+            map.setPaintProperty(lineLayerId, 'line-color', `rgba(255, 200, 0, ${pulse})`);
+            map.setPaintProperty(lineLayerId, 'line-width', 2 + 2 * Math.abs(Math.sin(phase)));
+          }
+        } catch { /* ignore */ }
+      }, 50);
+    },
+
+    async zoomToBbox(bbox, sourceCrs, sourceDefinition = null) {
+      if (!this.map) {return;}
+      const bounds = await this.resolveExtent(bbox, sourceCrs, sourceDefinition);
+      if (!bounds) {return;}
+
+      try {
+        this.map.fitBounds(bounds, { padding: 50, maxZoom: 18 });
+      } catch (e) {
+        console.warn('Map fitBounds failed', e);
+        return;
+      }
+
+      this.pulseExtent(bounds);
+    },
+
+    async highlightBbox(bbox, sourceCrs, sourceDefinition = null) {
+      const bounds = await this.resolveExtent(bbox, sourceCrs, sourceDefinition);
+      if (!bounds) {return;}
+      this.pulseExtent(bounds);
+    },
   }
 };
 </script>
 
 <style lang="scss">
-@import "ol/ol.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 #stac-browser {
+  .map-container.expanded .map {
+    height: calc(100vh - 30px) !important;
+  }
+
   .map-popover {
     max-width: 400px;
   }
@@ -272,7 +694,7 @@ export default {
     top: -1px;
     left: -1px;
   }
-  
+
   .popover-children {
     max-height: 500px;
     overflow: auto;

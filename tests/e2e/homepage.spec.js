@@ -1,18 +1,63 @@
-import { test, expect } from '@playwright/test';
-import { HOME_PATH } from './helpers';
+/**
+* Homepage / catalog index tests.
+*
+* Verifies the STAC Browser landing page: catalog list rendering, search input,
+* navigation to a catalog, and registry entry clicks.
+*
+* Fixtures: tests/fixtures/templates/registry.json (synthetic Portolan registry export)
+*/
+import { test, expect } from './fixtures.js';
+import { HOME_PATH, mockStacResource } from './helpers.js';
+import StaticCatalog from '../fixtures/instances/static.js';
+import fs from 'fs';
+const registry = JSON.parse(fs.readFileSync(
+  new URL('../fixtures/templates/registry.json', import.meta.url), 'utf-8'
+));
+// The list drops catalogs the registry has removed, so it is shorter than the export.
+const listedCatalogs = registry.links.filter(
+  link => link.rel === 'child' && link['portolan_registry:status'] !== 'removed'
+);
+import CONFIG from '../../config.js';
 
-test.describe('STAC Browser Homepage', () => {
-  test('should load the homepage successfully', async ({ page }) => {
-    // Navigate to the homepage
+test.describe('STAC Browser Data Source Selection', () => {
+  // ensure every test uses the mocked registry response
+  test.beforeEach(async ({ worker }) => {
+    // App loads the catalog list from CONFIG.registryUrl
+    await mockStacResource(worker, CONFIG.registryUrl, registry);
+  });
+  test('should load the data source selection successfully', async ({ page }) => {
+    // Navigate to the data source selection (STAC Index already mocked in beforeEach)
     await page.goto(HOME_PATH);
     
     // Check if the page title is visible
     await expect(page.locator('header [role="banner"]')).toBeVisible();
-    
-    // Verify the page loads without errors
-    await expect(page).toHaveTitle(/STAC Browser/);
-  });
 
+    // Verify the page loads without errors
+    await expect(page).toHaveTitle(/Portolan Browser/);
+    
+    // confirm that the STAC index container is present and contains at least one entry
+    await page.waitForSelector('.stac-index');
+    const indexButtons = page.locator('.stac-index button');
+    const count = await indexButtons.count();
+    expect(count).toBeGreaterThan(10);
+    
+    // every entry should have a title
+    await Promise.all(Array.from({ length: count }, (_, i) =>
+      expect(indexButtons.nth(i).locator('strong')).toHaveCount(1)
+    ));
+
+    // Only API entries carry a badge; a static catalog is shown without one. Count
+    // the badges rather than the button text, which would also match a title that
+    // happens to contain the word.
+    const apiCatalogs = listedCatalogs.filter(
+      link => link['portolan_registry:api_type'] === 'api'
+    );
+    expect(apiCatalogs.length).toBeGreaterThan(0);
+    const badges = page.locator('.stac-index button .badge');
+    await expect(badges).toHaveCount(apiCatalogs.length);
+    await expect(badges.first()).toHaveText(/API/i);
+  });
+  
   test('should render language dropdown with flag icon and correct defaults', async ({ page }) => {
     await page.goto(HOME_PATH);
     
@@ -32,24 +77,24 @@ test.describe('STAC Browser Homepage', () => {
     const dropdownMenu = page.locator('.dropdown-menu');
     await expect(dropdownMenu).toBeVisible();
     
-    // Count the number of language options (should be 11)
+    // Count the number of language options (should be as defined in the config)
     const languageOptions = dropdownMenu.locator('.dropdown-item');
-    await expect(languageOptions).toHaveCount(11);
+    await expect(languageOptions).toHaveCount(CONFIG.supportedLocales.length);
     
     // Verify English is visible in the list
     const englishOption = dropdownMenu.getByText(/english/i);
     await expect(englishOption).toBeVisible();
   });
-
+  
   test('should render catalog URL input with proper elements', async ({ page }) => {
     await page.goto(HOME_PATH);
     
     // Check if the label/heading is visible
-    const label = page.getByText(/please specify a stac catalog or api/i);
+    const label = page.getByText(/please enter a portolan catalog/i);
     await expect(label).toBeVisible();
     
     // Find the input textbox
-    const input = page.getByRole('textbox', { name: /please specify a stac catalog or api/i });
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
     await expect(input).toBeVisible();
     
     // Verify the placeholder
@@ -60,11 +105,11 @@ test.describe('STAC Browser Homepage', () => {
     await expect(loadButton).toBeVisible();
     await expect(loadButton).toBeEnabled();
   });
-
+  
   test('should allow typing in the catalog URL input', async ({ page }) => {
     await page.goto(HOME_PATH);
     
-    const input = page.getByRole('textbox', { name: /please specify a stac catalog or api/i });
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
     
     // Type a valid STAC API URL
     await input.fill('https://planetarycomputer.microsoft.com/api/stac/v1/');
@@ -72,11 +117,11 @@ test.describe('STAC Browser Homepage', () => {
     // Verify the value was entered
     await expect(input).toHaveValue('https://planetarycomputer.microsoft.com/api/stac/v1/');
   });
-
+  
   test('should show error message while typing invalid URL', async ({ page }) => {
     await page.goto(HOME_PATH);
     
-    const input = page.getByRole('textbox', { name: /please specify a stac catalog or api/i });
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
     
     // Type an invalid URL
     await input.fill('not-a-valid-url');
@@ -85,24 +130,110 @@ test.describe('STAC Browser Homepage', () => {
     const errorMessage = page.getByText(/the url is invalid/i);
     await expect(errorMessage).toBeVisible();
   });
-
-  test('should navigate to catalog when valid URL is loaded', async ({ page }) => {
+  
+  test('should navigate to catalog when valid URL is loaded', async ({ page, worker }) => {
+    const catalogUrl = 'https://planetarycomputer.microsoft.com/api/stac/v1/';
+    const mockCatalog = (new StaticCatalog({ url: catalogUrl }))
+      .setMetadata({
+        title: 'Microsoft Planetary Computer STAC API',
+        description: 'Mock catalog for testing navigation.',
+      });
+    
+    await mockCatalog.createServer(worker, { reset: false });
+    
     await page.goto(HOME_PATH);
     
-    const input = page.getByRole('textbox', { name: /please specify a stac catalog or api/i });
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
     const loadButton = page.getByRole('button', { name: /^load$/i });
     
-    // Type the Planetary Computer STAC API URL
-    await input.fill('https://planetarycomputer.microsoft.com/api/stac/v1/');
-    
-    // Click the Load button
+    await input.fill(catalogUrl);
     await loadButton.click();
     
     // Wait for navigation and verify the catalog title appears as h1 heading
     const catalogTitle = page.getByRole('heading', { name: /microsoft planetary computer stac api/i });
-    await expect(catalogTitle).toBeVisible({ timeout: 10000 });
+    await expect(catalogTitle).toBeVisible();
     
     // Verify the page title changed
     await expect(page).toHaveTitle(/microsoft planetary computer stac api/i);
+  });
+  
+  test('clicking a STAC index entry populates url and navigates', async ({ page, worker }) => {
+    const expectedTitle = 'Example Catalog';
+    const expectedUrl = 'https://stac.example/stac/catalog.json';
+    const mockCatalog = new StaticCatalog({ url: expectedUrl })
+      .setMetadata({
+        title: expectedTitle,
+        description: 'Mock catalog for the first STAC index entry.',
+      });
+    
+    await mockCatalog.createServer(worker, { reset: false });
+    
+    await page.goto(HOME_PATH);
+    const indexButtons = page.locator('.stac-index button');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+    
+    // Click the first entry in the STAC index
+    await indexButtons.first().click();
+    
+    // Wait for navigation and verify the catalog title appears as h1 heading
+    const catalogTitle = page.getByRole('heading', { name: new RegExp(expectedTitle, 'i') });
+    await expect(catalogTitle).toBeVisible();
+    
+    // Verify the page title changed
+    await expect(page).toHaveTitle(new RegExp(expectedTitle, 'i'));
+  });
+  
+  test('the registry search box filters the catalog list', async ({ page }) => {
+    await page.goto(HOME_PATH);
+    const indexButtons = page.locator('.stac-index button');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+
+    const search = page.getByRole('searchbox', { name: /search the registry/i });
+    await expect(search).toBeVisible();
+
+    // Every word must match. "dem" alone matches two catalogs, "japan dem" one.
+    await search.fill('dem');
+    await expect(indexButtons).toHaveCount(2);
+    await search.fill('japan dem');
+    await expect(indexButtons).toHaveCount(1);
+    await expect(indexButtons.first()).toContainText('Japan DEM Catalog');
+
+    // The registry id and the URL are searchable, not only the title.
+    await search.fill('kelp-forest-api');
+    await expect(indexButtons).toHaveCount(1);
+    await search.fill('euro-sat');
+    await expect(indexButtons).toHaveCount(1);
+    await expect(indexButtons.first()).toContainText('EuroSat Catalog');
+
+    // A removed catalog stays hidden even when the query names it.
+    await search.fill('retired');
+    await expect(indexButtons).toHaveCount(0);
+    await expect(page.getByText('No registered catalog matches "retired".')).toBeVisible();
+
+    await search.fill('');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+  });
+
+  test('typing a catalog URL does not filter the registry list', async ({ page }) => {
+    await page.goto(HOME_PATH);
+    const indexButtons = page.locator('.stac-index button');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+
+    const input = page.getByRole('textbox', { name: /please enter a portolan catalog/i });
+    await input.fill('https://data.example/catalog.json');
+    await expect(indexButtons).toHaveCount(listedCatalogs.length);
+  });
+
+  test('language switch persists across navigation', async ({ page }) => {
+    await page.goto(HOME_PATH);
+    const languageButton = page.getByRole('button', { name: /language/i });
+    await languageButton.click();
+    const spanish = page.getByText(/español/i);
+    await spanish.click();
+    // verify label changed (load button text in Spanish via translation key)
+    await expect(page.getByRole('button', { name: /cargar|cargar/i })).toBeVisible();
+    // navigate away and back
+    await page.goto(HOME_PATH);
+    await expect(page.getByRole('button', { name: /cargar|cargar/i })).toBeVisible();
   });
 });

@@ -1,22 +1,45 @@
 import { defineConfig, devices } from '@playwright/test';
+import os from 'node:os';
+
+function getEnvWithoutSB() {
+  const env = {};
+  for (const key in process.env) {
+    if (!key.startsWith('SB_')) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
 
 /**
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  
+
+  /* Warm up the (dev) server before the workers start, see global-setup.js */
+  globalSetup: './tests/e2e/global-setup.js',
+
   /* Run tests in files in parallel */
   fullyParallel: true,
   
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  
-  /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
-  
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+
+  retries: 1,
+
+  /* Default assertion timeout. Raised from Playwright's 5s default because the
+     dev server transforms modules on demand and, with many parallel workers,
+     async renders/navigations routinely need longer locally. */
+  expect: { timeout: 10000 },
+
+  /* GitHub ubuntu-latest runners have 4 vCPUs and CI serves a static production
+     build (no on-demand transforms), so the fully-parallel suite scales there.
+     Locally the dev server transforms modules on demand from a single process,
+     so it — not the CPU count — is the bottleneck: the default (50% of cores)
+     overwhelms it on many-core machines and makes lazy-chunk loads flaky. Use
+     half the cores but cap at 6. */
+  workers: process.env.CI ? 4 : Math.min(6, Math.max(1, Math.ceil(os.cpus().length / 2))),
   
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: [
@@ -27,18 +50,25 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.CI 
+    baseURL: process.env.CI
       ? 'http://localhost:4173'  // Vite preview server port
-      : 'http://localhost:8080',
+      : 'http://localhost:8181', // Dedicated test port; 8080 may be occupied by unrelated local services
     
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
+
+    /* Clipboard permissions for copy-related tests */
+    permissions: ['clipboard-read', 'clipboard-write'],
     
     /* Screenshot on failure */
     screenshot: 'only-on-failure',
     
     /* Video on failure */
     video: 'retain-on-failure',
+
+    /* Force English locale so tests are deterministic regardless of host/CI locale.
+       The app auto-detects language from navigator.languages when detectLocaleFromBrowser is true. */
+    locale: 'en',
   },
 
   /* Configure projects for major browsers */
@@ -66,17 +96,23 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: process.env.CI 
+  webServer: process.env.CI
     ? {
-        // In CI: Build and serve the production build
-        command: 'npm run build && npx vite preview --port 4173 --strictPort',
+        // In CI: Build and serve the production build.
+        // STAC_BROWSER_E2E enables __VUE_PROD_DEVTOOLS__ so tests can introspect
+        // the map (see vite.config.js); it does not affect real production builds.
+        command: 'pnpm run build && pnpm exec vite preview --port 4173 --strictPort',
+        env: { ...getEnvWithoutSB(), STAC_BROWSER_E2E: 'true' },
         url: 'http://localhost:4173',
         reuseExistingServer: false,
         timeout: 120 * 1000,
       }
     : {
-        command: 'npm start',
-        url: 'http://localhost:8080',
+        // Dedicated port + strictPort so the tests never silently reuse an
+        // unrelated service that happens to listen on the default dev port.
+        command: 'pnpm start --port 8181 --strictPort',
+        env: { ...process.env, STAC_BROWSER_E2E: 'true' },
+        url: 'http://localhost:8181',
         reuseExistingServer: true,
         timeout: 120 * 1000,
       },

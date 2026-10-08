@@ -1,7 +1,32 @@
 <template>
   <section v-if="formattedData.length > 0" class="metadata">
     <component :is="headerTag" v-if="title">{{ titleText }}</component>
-    <b-card-group columns :class="`count-${formattedData.length}`">
+    <template v-if="isGeoparquet">
+      <b-card-group columns :class="`count-${primaryGroups.length}`" v-if="primaryGroups.length > 0">
+        <MetadataGroup
+          v-for="group in primaryGroups"
+          :key="group.extension"
+          v-bind="group"
+        />
+      </b-card-group>
+      <div v-if="additionalGroups.length > 0" class="additional-metadata-section">
+        <div class="additional-metadata-header" @click="additionalOpen = !additionalOpen">
+          <h3 class="mb-0">{{ $t('metadata.additional') || 'Additional Metadata' }}</h3>
+          <BIconChevronDown v-if="!additionalOpen" />
+          <BIconChevronUp v-else />
+        </div>
+        <b-collapse v-model="additionalOpen">
+          <b-card-group columns :class="`count-${additionalGroups.length}`">
+            <MetadataGroup
+              v-for="group in additionalGroups"
+              :key="group.extension"
+              v-bind="group"
+            />
+          </b-card-group>
+        </b-collapse>
+      </div>
+    </template>
+    <b-card-group v-else columns :class="`count-${formattedData.length}`">
       <MetadataGroup
         v-for="group in formattedData"
         :key="group.extension"
@@ -12,7 +37,9 @@
 </template>
 
 <script>
-import { BCardGroup } from 'bootstrap-vue-next';
+import { BCardGroup, BCollapse } from 'bootstrap-vue-next';
+import BIconChevronDown from '~icons/bi/chevron-down';
+import BIconChevronUp from '~icons/bi/chevron-up';
 import {
   formatAsset,
   formatCatalog,
@@ -35,6 +62,9 @@ export default {
   name: "MetadataGroups",
   components: {
     BCardGroup,
+    BCollapse,
+    BIconChevronDown,
+    BIconChevronUp,
     MetadataGroup,
   },
   mixins: [
@@ -65,6 +95,7 @@ export default {
   data() {
     return {
       formattedData: [],
+      additionalOpen: false,
     };
   },
   computed: {
@@ -74,6 +105,15 @@ export default {
         return this.title;
       }
       return this.$t("metadata.title");
+    },
+    isGeoparquet() {
+      return this.type === 'Collection' && this.formattedData.some(g => g.extension === 'geoparquet');
+    },
+    primaryGroups() {
+      return this.formattedData.filter(g => g.extension === 'table');
+    },
+    additionalGroups() {
+      return this.formattedData.filter(g => g.extension !== 'table');
     },
   },
   watch: {
@@ -151,13 +191,14 @@ export default {
 
 <style lang="scss">
 @import "../theme/variables.scss";
+@import "../theme/mixins.scss";
 
 #stac-browser {
   .metadata {
     .card {
       border: 0;
-      margin-top: $block-margin;
-      margin-bottom: $block-margin;
+      margin-top: var(--sb-block-gap);
+      margin-bottom: var(--sb-block-gap);
       text-align: left;
 
       .metadata-rows {
@@ -287,6 +328,14 @@ export default {
       line-height: 1.5em;
       margin-bottom: 0.5em;
     }
+    .additional-metadata-section {
+      margin-top: $block-gap;
+
+      .additional-metadata-header {
+        @include section-header;
+      }
+    }
+
     .checksum-input {
       width: 100%;
     }

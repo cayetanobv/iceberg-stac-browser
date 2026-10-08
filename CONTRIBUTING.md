@@ -16,7 +16,7 @@ STAC Browser is following the [STAC code of conduct](https://github.com/radiante
 STAC Browser builds on top of [VueJS 3](https://vuejs.org/) and [Vite](https://vite.dev),
 so you need a recent version of [NodeJS and npm](https://nodejs.org/en/) installed.
 
-You can run the following commands (see also "[Get started](README.md#get-started)" in the README):
+You can run the following commands (see also "[Quick Start](README.md#quick-start)" in the README):
 
 - Getting Started
   - `npm run install`: Install the dependencies, this is required once at the beginning.
@@ -37,23 +37,29 @@ The [release process is documented separately](docs/release.md).
 
 ## Tests
 
-This directory contains end-to-end tests for STAC Browser using Playwright.
+End-to-end tests for STAC Browser using [Playwright](https://playwright.dev). All tests run against mock data — no real network calls.
+
+For work on testing fixtures, test fixture documentation can be found [here](tests/TESTING_DOCS.md).
 
 Tests are located in the `tests/e2e` directory and follow the naming convention `*.spec.js`.
 
-**Additional resources:**
-
-- [Playwright Documentation](https://playwright.dev/docs/intro)
-- [Best Practices](https://playwright.dev/docs/best-practices)
-- [Locators](https://playwright.dev/docs/locators)
-
 ## Running Tests
+
+Before running the tests, you have to install a Playwright browser (`npx playwright install`) and Docker.
 
 - `npm test`: Run all tests
 - `npm run test:e2e:ui`: Run UI tests in UI mode (interactive)
 - `npm run test:e2e:headed`: Run UI tests in headed mode (see browser)
 - `npm run test:e2e:debug`: Debug UI tests
 - `npm run test:e2e:report`: View UI test report
+
+**Additional resources:**
+
+- [Test Fixture Documentation](tests/TESTING_DOCS.md)
+- [Playwright Documentation](https://playwright.dev/docs/intro)
+- [Best Practices](https://playwright.dev/docs/best-practices)
+- [Locators](https://playwright.dev/docs/locators)
+
 
 ## AI Use Policy
 

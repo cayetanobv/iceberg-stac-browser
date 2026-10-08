@@ -1,237 +1,223 @@
-# Iceberg STAC Browser
+# Iceberg STAC Browser <!-- omit in toc -->
 
-A fork of [STAC Browser](https://github.com/radiantearth/stac-browser) with built-in support for browsing and querying [Apache Iceberg](https://iceberg.apache.org/) tables directly from STAC catalogs, powered by [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview.html).
+A fork of [Portolan Browser](https://github.com/portolan-sdi/portolan-browser) that browses and queries
+[Apache Iceberg](https://iceberg.apache.org/) tables described with the
+[STAC Iceberg extension](https://github.com/portolan-sdi/stac-iceberg-extension) v1.1.0.
 
-When a STAC collection has an asset with `type: "application/x-iceberg"`, a **Data Explorer** tab appears with:
+Demo: <https://cayetanobv.github.io/iceberg-stac-browser/>
 
-- **Schema display** — column names, types, row count, and partition info from STAC metadata
-- **Data preview** — first 100 rows queried via DuckDB-WASM `iceberg_scan()`
-- **SQL editor** — write and run custom SQL queries against Iceberg tables
-- **Geometry preview** — sample geometries rendered on an OpenLayers map
-- **Snapshot listing** — view Iceberg table snapshots (time travel)
-- **Download** — export the latest snapshot or query results as GeoParquet
-- **Export** — download query results as CSV or GeoJSON
+## Iceberg tables <!-- omit in toc -->
 
-All processing runs entirely in the browser. No backend required.
+A collection with `iceberg:*` fields gets an **Apache Iceberg table** section:
 
-## How it works
+- **Connection**: every field of extension v1.1.0, from the catalog type and URI to the current
+  snapshot and the partition spec.
+- **Schema** and **Snapshots**: read from the table's `metadata.json`. A collection that pins a snapshot
+  the table no longer has is reported as stale.
+- **Code**: DuckDB, PyIceberg, BigQuery and DuckDB `ATTACH` snippets, where the collection has the fields
+  for them.
+- **Query**: [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview.html) runs in the browser on demand.
+  Preview rows, run SQL, query an earlier snapshot, draw geometries on a map and download GeoParquet 2.0.
 
-```
-STAC Catalog (static JSON on cloud storage)
-  └── Collection with asset type: application/x-iceberg
-        └── Data Explorer tab appears
-              ├── DuckDB-WASM loads lazily (~47KB gzipped)
-              ├── Iceberg metadata resolved via cloud storage API
-              └── Queries run in-browser via iceberg_scan()
-```
+Iceberg v3 tables with native `geometry` columns and v2 tables with WKB geometry both work. The table is
+read from `iceberg:metadata_location`, so no catalog server is needed. A collection written against
+extension v1.0.0 still opens, with notices for the fields to update.
 
-DuckDB-WASM cannot use `gs://` or `s3://` protocols directly — URLs are converted to `https://` automatically. For enterprise metastores (BigLake, Glue), the latest Iceberg metadata version is resolved by listing the `metadata/` directory via the cloud storage JSON API.
+---
 
-## What changed vs upstream STAC Browser
+## Upstream project <!-- omit in toc -->
 
-| Area | Change | Size |
-| --- | --- | --- |
-| New component | `src/components/IcebergExplorer.vue` | ~490 lines |
-| New component | `src/components/IcebergResultsTable.vue` | ~130 lines |
-| New module | `src/duckdb.js` (DuckDB-WASM init + query) | ~180 lines |
-| Modified | `src/views/Catalog.vue` — conditional tab | ~15 lines |
-| Modified | `src/components/ShowAssetLinkMixin.js` — tab ID | 1 line |
-| New dependency | `@duckdb/duckdb-wasm` | package.json |
+Portolan Browser is a web viewer for [Portolan](https://www.portolan-sdi.org/) catalogs. Point it at a
+catalog and it draws the data on a map, renders the tables behind that data, and lets you walk the
+metadata without installing anything.
 
-Total: ~800 lines of new code, ~16 lines of changes to existing code. Small surface area for easy rebasing on upstream updates.
+A live instance runs at <https://browser.portolan-sdi.org>. It opens on the catalogs listed in the
+[Portolan registry](https://github.com/portolan-sdi/portolan-registry), so you can browse published data
+straight away.
 
-## Keeping in sync with upstream
+This is a fork of [STAC Browser](https://github.com/radiantearth/stac-browser), maintained by the
+Portolan project. STAC Browser already handles STAC well. Portolan catalogs carry more than STAC
+requires, including cartography, cloud-optimized files, and registry metadata that a generic STAC client
+has no reason to understand. This fork uses all of it. Everything upstream does still works, and a plain
+STAC catalog opens here too.
 
-This fork follows the pattern used by [FAIRiCUBE](https://github.com/FAIRiCUBE/stac-browser), [Copernicus CDSE](https://github.com/eu-cdse/copernicus-browser), and other domain-specific STAC Browser forks. Changes are isolated to new files + minimal modifications to existing ones.
+## Table of Contents <!-- omit in toc -->
 
-Strategy: **rebase on upstream releases** (not continuous merge). Upstream releases happen every few months, and since we only modify one existing file (`Catalog.vue`), conflicts will be rare.
+- [What This Fork Adds](#what-this-fork-adds)
+- [Quick Start](#quick-start)
+- [Browse Your Own Catalog](#browse-your-own-catalog)
+- [Deploy an Instance](#deploy-an-instance)
+- [Configuration](#configuration)
+- [Documentation](#documentation)
+- [Relationship to STAC Browser](#relationship-to-stac-browser)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License and Credits](#license-and-credits)
 
-## Prerequisites
+## What This Fork Adds
 
-- **Public buckets**: No authentication needed — works out of the box
-- **Private buckets**: Paste a GCS/S3 bearer token in the Data Explorer's authentication panel
-- **CORS**: The cloud storage bucket must allow cross-origin requests from the browser origin
+**The publisher's own cartography.** A Portolan collection registers MapLibre GL styles as assets with
+the `style` role. The browser discovers them, applies them to the collection's data, and offers a picker
+with a legend when a collection ships more than one. An item registers styles the same way. A partitioned
+collection needs that, because each partition has its own range of values. Data looks the way whoever
+published it meant it to look, rather than taking a default colour the client picked.
 
-## Examples
+**GeoParquet drawn directly on the map.** The browser reads GeoParquet in the browser with
+[hyparquet](https://github.com/hyparam/hyparquet) and hands the geometries to MapLibre. No tile server
+sits in between. Files in a projected CRS are reprojected to lon/lat through proj4 first. Size limits
+stop a large file from locking up the tab, and the browser says so when it declines to draw one.
 
-The upstream demo instance is at <https://radiantearth.github.io/stac-browser/>.
+**A table view of that same GeoParquet.** A data preview panel lists the rows with a per-column filter.
+Reading the attributes no longer means downloading the file and opening something else.
 
-The catalog section of [STAC Index](https://stacindex.org) is also built on top of STAC Browser (currently v2).
+**Cloud-Optimized GeoTIFF rendered client-side.** COG assets decode through
+[deck.gl-geotiff](https://github.com/developmentseed/deck.gl-geotiff) in a Web Worker, which keeps decompression
+off the main thread. A categorical raster takes its colours from the `color_hint` values of its own
+[classification classes](https://github.com/stac-extensions/classification), and the layer control lists those
+classes as a legend. Where a collection uses the STAC [render extension](https://github.com/stac-extensions/render),
+the browser applies its colormap, rescale, and nodata values, and lists each named render as a style you
+can switch between. See [rasters.md](docs/rasters.md) for the full order of precedence.
 
-## Get Started
+**A start page built from the registry.** The catalog list comes from the Portolan registry's nightly
+crawl rather than a list hardcoded in this repository. Entries show the publisher's logo and the
+collection and feature counts the crawl measured. Point [`registryUrl`](docs/options.md#registryurl)
+somewhere else to offer a different list.
 
-First, you need to clone or download this repository.
+**MapLibre GL throughout.** Upstream maps with OpenLayers. This fork replaced it with MapLibre GL so that
+publisher styles, PMTiles, and deck.gl layers all run on one renderer. Basemaps are MapLibre style
+documents, and the map expands in place instead of going fullscreen.
 
-Then switch into the newly created folder and install all dependencies:
+## Quick Start
+
+Clone the repository and install dependencies. The project uses [pnpm](https://pnpm.io/) and commits a
+lockfile.
 
 ```bash
-npm install
+git clone https://github.com/portolan-sdi/portolan-browser.git
+cd portolan-browser
+pnpm install
 ```
 
-By default, STAC Browser will let you browse all catalogs on STAC Index.
-
-To browse only your own static STAC catalog or STAC API, set the [`catalogUrl`](docs/options.md#catalogurl) config parameter when running the dev server.
-In this example we point to EarthSearch (`https://earth-search.aws.element84.com/v1/`):
+Start the development server:
 
 ```bash
-# Linux / MacOS
-SB_catalogUrl="https://earth-search.aws.element84.com/v1/" npm start
+pnpm start
+```
+
+This serves the browser on <http://localhost:8080>, opening on the registry catalog list. Vite moves to
+the next free port when 8080 is already taken, and prints the one it chose.
+
+## Browse Your Own Catalog
+
+Set `catalogUrl` to pin the browser to a single catalog. It then skips the start page and opens there.
+
+```bash
+# Linux / macOS
+SB_catalogUrl="https://data.source.coop/ftw/global-data/catalog.json" pnpm start
 # Windows (PowerShell)
-$env:SB_catalogUrl="https://earth-search.aws.element84.com/v1/"; npm start
+$env:SB_catalogUrl="https://data.source.coop/ftw/global-data/catalog.json"; pnpm start
 ```
 
-This will start the development server on <http://localhost:8080>, which you can then open in your preferred browser.
-
-To open a local file on your system, see the chapter [Using Local Files](docs/local_files.md).
-
-If you'd like to publish the STAC Browser instance use the following command:
+Any STAC catalog or STAC API works, not only Portolan ones:
 
 ```bash
-# Linux / MacOS
-SB_catalogUrl="https://earth-search.aws.element84.com/v1/" npm run build
-# Windows (PowerShell)
-$env:SB_catalogUrl="https://earth-search.aws.element84.com/v1/"; npm run build
+SB_catalogUrl="https://earth-search.aws.element84.com/v1/" pnpm start
 ```
 
-This will only work on the root path of your domain though. If you'd like to publish in a sub-folder,
-you can use the [`pathPrefix`](docs/options.md#pathprefix) option.
+To open a catalog from your own disk, see [Using Local Files](docs/local_files.md).
 
-After building, `dist/` will contain all assets necessary
-host the browser. These can be manually copied to your web host of choice.
-**Important:** If `historyMode` is set to `history` (which is the default value), you'll need to add
-an additional configuration file for URL rewriting.
-Please see the [`historyMode`](docs/options.md#historymode) option for details.
+## Deploy an Instance
 
-You can customize STAC Browser, too. See the options and theming details below.
-If not stated otherwise, all options can be specified in the [config file](config.js), in an external config file via `SB_CONFIG`, via `SB_*` environment variables, or in the runtime config file..
-Vite also loads `.env`, `.env.local`, `.env.[mode]` and `.env.[mode].local`, so you can keep local overrides in e.g. `.env.local`.
-For example, `SB_CONFIG=./config.local.mjs npm start` loads `config.local.mjs` (\*nix-based systems) on top of `config.js`.
-You can also provide configuration options "at runtime" (after the build).
+Build the static site:
 
-### Private query parameters
+```bash
+SB_catalogUrl="https://data.source.coop/ftw/global-data/catalog.json" pnpm run build
+```
 
-**_experimental_**
+`dist/` then holds everything needed to serve the browser. Copy it to any static host. There is no
+server-side component and nothing to keep running.
 
-STAC Browser supports "private query parameters", e.g. for passing an API key through. Any query parameter that is starting with a `~` will be stored internally, removed from the URL and be appended to STAC requests. This is useful for token-based authentication via query parameters.
+Two settings usually need attention:
 
-So for example if your API requires to pass a token via the `API_KEY` query parameter, you can request STAC Browser as such:
-`https://examples.com/stac-browser/?~API_KEY=123` which will change the URL to `https://examples.com/stac-browser/` and store the token `123` internally. The request then will have the query parameter attached and the Browser will request e.g. `https://examples.com/stac-api/?API_KEY=123`.
+- Serving from a subdirectory rather than a domain root requires [`pathPrefix`](docs/options.md#pathprefix).
+- The default [`historyMode`](docs/options.md#historymode) in this fork is `hash`, which works on any
+  static host. Switching it to `history` gives cleaner URLs but needs URL rewriting configured on the host.
 
-Please note: If the server hosting STAC Browser should not get aware of private query parameters and you are having `historyMode` set to `"history"`, you can also append the private query parameters to the hash so that it doesn't get transmitted to the server hosting STAC Browser.
-In this case use for example `https://examples.com/stac-browser/#?~API_KEY=123` instead of `https://examples.com/stac-browser/?~API_KEY=123`.
+A [Docker image](docs/docker.md) is also available.
 
-### Versions
+## Configuration
 
-STAC Browser has gone recently through a number of major versions.
-The following table shows the major differences between versions and the upcoming plans:
+Options can be set in [`config.js`](config.js), in an external file via `SB_CONFIG`, through `SB_*`
+environment variables, or in a runtime config file read after the build. Vite also loads `.env` and
+`.env.local`, which is a convenient place for local overrides.
 
-| Version   | Summary |
-| --------- | ------- |
-| 3.3.x     | The last version that uses Leaflet as mapping library. |
-| 4.0.x     | Uses OpenLayers as mapping library. The last version based on VueJS 2, vue-cli and Bootstrap 4. |
-| **5.x.x** | The upcoming version based on VueJS 3, Vite and Bootstrap 5. Target: Q1 2026 |
-| 6.x.x     | Planned version with a new layout, a pluggable interface, and better integration into existing sites. Target: Q4 2026 |
+```bash
+SB_CONFIG=./config.local.mjs pnpm start
+```
 
-For more details on our plans, please check our
-[milestones](https://github.com/radiantearth/stac-browser/milestones).
+The full list is in the **[options documentation](docs/options.md)**.
 
-### Migrate from old versions
+## Documentation
 
-Please read the [release notes](https://github.com/radiantearth/stac-browser/releases).
-They contain notes on required changes for a smooth migration.
+| Topic | Document |
+| ----- | -------- |
+| Every configuration option | [options.md](docs/options.md) |
+| Basemaps and projections | [basemaps.md](docs/basemaps.md) |
+| Styling and theming | [styling.md](docs/styling.md) |
+| Translations and locales | [localization.md](docs/localization.md) |
+| Metadata rendering and custom fields | [metadata.md](docs/metadata.md) |
+| Raster rendering, colormaps, and legends | [rasters.md](docs/rasters.md) |
+| Widgets | [widgets.md](docs/widgets.md) |
+| Actions on links and assets | [actions.md](docs/actions.md) |
+| Code snippet generators | [code-generators.md](docs/code-generators.md) |
+| Running under Docker | [docker.md](docs/docker.md) |
+| Default map layers, stacking, and the layer picker | [layers.md](docs/layers.md) |
+| Opening catalogs from disk | [local_files.md](docs/local_files.md) |
 
-## Customize
+To publish a catalog this browser can read, start with the
+[Portolan specification](https://github.com/portolan-sdi/portolan-spec) and the
+[Portolan CLI](https://github.com/portolan-sdi/portolan-cli).
 
-### Options
+## Relationship to STAC Browser
 
-STAC Browser supports customization through a long list of options that can be set in various ways.
+Upstream STAC Browser is the foundation, and this fork tracks it. Fixes and features from upstream come
+in through periodic sync pull requests, and fixes that are not Portolan-specific go back upstream where
+they apply.
 
-Please read the **[documentation for the options](docs/options.md)**.
+The two projects version independently. Portolan Browser starts at 0.1.0, matching the Portolan
+specification release it implements. Upstream's version is recorded in the changelog when a sync lands.
+The changelog keeps upstream's history below the fork's own entries.
 
-### Languages
+## Development
 
-STAC Browser can be translated into other languages and can localize number formats, date formats etc.
-Currently, we support more than 10 different languages plus a variety of local dialects and other localizations.
+```bash
+pnpm run test:unit         # Vitest unit tests
+pnpm run test:e2e          # Playwright end-to-end tests
+pnpm run lint              # ESLint, with fixes applied
+pnpm run docs:lint         # Markdown linting
+pnpm test                  # Everything
+```
 
-Please read the **[localization documentation](docs/localization.md)** for more details.
-
-### Themes
-
-You can customize STAC Browser in the `src/theme` folder. It contains Sass files (a CSS preprocessor), which you can change to suit your needs.
-
-The easiest solution is to start with the `variables.scss` file and customize the options given there.
-For simplicity we just provide some common options as default, but you can also add and customize any Bootstrap variable,
-see <https://getbootstrap.com/docs/4.0/getting-started/theming/> for details.
-
-The file `page.scss` contains some Sass declarations for the main sections of STAC Browser and you can adopt those to suit your needs.
-
-If you need even more flexibility, you need to dig into the Vue files and their dependencies though.
-
-### Basemaps
-
-STAC Browser supports various types of basemaps and projections.
-
-More information about how to configure and customize the basemaps can be found in the **[Basemap documentation](docs/basemaps.md)**.
-
-### Actions
-
-STAC Browser has a pluggable interface to share or open assets and links with other services, which we call "actions".
-
-More information about how to add or implement actions can be found in the **[Actions documentation](docs/actions.md)**.
-
-### Widgets
-
-STAC Browser has a pluggable interface and allows to add additional content to the pages, which we call "widgets".
-
-More information about how to add or implement widgets can be found in the **[Widgets documentation](docs/widgets.md)**.
-
-### Metadata fields
-
-STAC Browsers offers several ways to customize and extend its metadata rendering.
-
-More information can be found in the **[Metadata documentation](docs/metadata.md)**.
-
-### Customization through root catalog
-
-You can also provide a couple of the config options through the root catalog.
-You need to provide a field `stac_browser` and then you can set any of the following options:
-
-- `apiCatalogPriority`
-- `authConfig` (except for the `formatter` as function)
-- `cardViewMode`
-- `cardViewSort`
-- `crossOriginMedia`
-- `defaultThumbnailSize`
-- `displayGeoTiffByDefault`
-- `showThumbnailsAsAssets`
-
-### Custom extensions
-
-STAC Browser supports some non-standardized extensions to the STAC specification that you can use to improve the user-experience.
-
-1. [Provider Object](https://github.com/radiantearth/stac-spec/blob/master/collection-spec/collection-spec.md#provider-object):
-   Add an `email` (or `mail`) field with an e-mail address and the mail will be shown in the Browser.
-2. [Alternative Assets Object](https://github.com/stac-extensions/alternate-assets?tab=readme-ov-file#alternate-asset-object):
-   Add a `name` field and it will be used as title in the tab header, the same applies for the core Asset Object.
-3. A link with relation type `icon` and a Browser-supported media type in any STAC entity will show an icon in the header and the lists of Catalogs, Collections and Items.
-
-## Docker
-
-You can use the Docker to work with STAC Browser. Please read [Docker documentation](docs/docker.md) for more details.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the test suites in more detail.
 
 ## Contributing
 
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to STAC Browser.
+Issues and pull requests are welcome. Portolan is an evolving standard and the browser is the reference
+implementation, so gaps between the two are worth reporting.
 
-## Sponsors
+- Bugs and feature requests: [GitHub issues](https://github.com/portolan-sdi/portolan-browser/issues)
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Agent norms for this repository: [AGENTS.md](AGENTS.md)
+- Discussion: the [Portolan Google Group](https://groups.google.com/g/portolan) and the
+  [Portolan channel](https://cloudnativegeo.slack.com/archives/C0A1JBH9529) in Cloud-Native Geo Slack
 
-The following sponsors have provided a substantial amount of funding for STAC Browser in the past:
+Changes to the standard itself belong in [portolan-spec](https://github.com/portolan-sdi/portolan-spec).
 
-- [swisstopo](https://www.swisstopo.admin.ch/) (maintenance, base funding for version 3, 4, 5 and 6)
-- [Radiant Earth](https://radiant.earth) (base funding for versions 1, 2 and 3)
-- [National Resources Canada](https://natural-resources.canada.ca/home) (multi-language support, maintenance)
-- [moreGeo GmbH](https://moregeo.it) (maintenance)
-- [Spacebel](https://spacebel.com) (collection search, mapping)
-- [Planet](https://planet.com) (authentication, maintenance)
-- [CloudFerro](https://cloudferro.com) (authentication, alternate asset and storage extension)
-- [Geobeyond](http://www.geobeyond.it/) (mapping)
+## License and Credits
+
+ISC, inherited from STAC Browser. See [LICENSE](LICENSE).
+
+STAC Browser is built by [moreGeo](https://moregeo.it) and contributors, with funding from swisstopo,
+Radiant Earth, Natural Resources Canada, EOEPCA / ESA, Spacebel, Planet, CloudFerro, and Geobeyond. The
+[upstream repository](https://github.com/radiantearth/stac-browser) lists what each of them funded.
+Portolan Browser is built on that work.

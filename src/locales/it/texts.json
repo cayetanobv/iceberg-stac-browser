@@ -70,7 +70,12 @@
     "false": "No",
     "true": "Si"
   },
+  "close": "Chiudi",
   "copy": "Copia",
+  "copyErrors": {
+    "permission": "Impossibile copiare. Controllare i permessi del browser.",
+    "unsupported": "Gli appunti non sono disponibili in questo browser."
+  },
   "default": "Predefinito",
   "defaultWithValue": "Predefinito ({value})",
   "deprecated": "Obsoleto",
@@ -111,6 +116,11 @@
     "serverError": "Il server ha riscontrato un problema. @:errors.contactProvider",
     "title": "Errore",
     "unauthorized": "La richiesta necessita di credenziali, ad esempio un token API. Inserisci i tuoi dati di accesso e riprova."
+  },
+  "exampleCode": {
+    "title": "Codice di esempio",
+    "storeAs": "Memorizza il codice come:",
+    "installDependencies": "Installare le dipendenze:"
   },
   "featureExperimental": "Questa funzione è ancora sperimentale e potrebbe dare risultati inaspettati!",
   "features": {
@@ -157,6 +167,7 @@
     "showFilter": "Mostra filtri"
   },
   "loading": "Carico...",
+  "manage": {},
   "map": "Mappa",
   "mapping": {
     "attribution": {
@@ -224,6 +235,14 @@
     "previous": "‹ Precedente"
   },
   "poweredBy": "Offerto da {link}",
+  "programming": {
+    "csharp": "C#",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "python": "Python",
+    "r": "R",
+    "rust": "Rust"
+  },
   "protocol": {
     "azure": "Microsoft Azure",
     "file": "File system (locale)",
@@ -272,6 +291,7 @@
     "between": "tra",
     "betweenOperatorDescription": "Verifica se un valore di campo numerico si trova all'interno dell'intervallo specificato. L'intervallo dato è inclusivo.",
     "dateDescription": "Data/ora nel sistema UTC (tempo coordinato internazionale).",
+    "disabledDueToSingleDate": "Questo filtro è disabilitato perché la collezione ha una singola data e ora come estensione temporale.",
     "enterCollections": "Inserire una o più Collezioni...",
     "enterItemIds": "Inserire uno o più ID di Elemento...",
     "enterSearchTerms": "Inserisci uno o più termini di ricerca...",
@@ -399,6 +419,8 @@
   "stacCollection": "Collezione | Collezioni",
   "stacItem": "Elemento | Elementi",
   "submit": "Invia",
+  "switchToDarkMode": "Passa alla modalità scura",
+  "switchToLightMode": "Passa alla modalità chiara",
   "table": {
     "emptyFilteredText": "Non ci sono record corrispondenti alla tua richiesta",
     "emptyText": "Non ci sono record da mostrare",
@@ -423,5 +445,8 @@
       "title": "Mostra schede"
     },
     "title": "Opzioni di visualizzazione"
+  },
+  "widgets": {
+    "featured": "In evidenza"
   }
 }

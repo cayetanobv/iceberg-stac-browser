@@ -3,6 +3,10 @@
 - [Adding custom fields](#adding-custom-fields)
   - [Example](#example)
   - [Translation](#translation)
+- [Hiding fields](#hiding-fields)
+  - [Example](#example-1)
+- [Customizing links](#customizing-links)
+  - [Example](#example-2)
 
 The metadata that STAC Browser renders is rendered primarily through the library [`stac-fields`](https://www.npmjs.com/package/@radiantearth/stac-fields).
 It contains a lot of rules for rendering [many existing STAC extensions](https://github.com/stac-utils/stac-fields/blob/main/fields.json) in a human-friendly way.
@@ -39,7 +43,7 @@ Please check the field specification for available options.
 
 ### Translation
 
-STAC Browser supports [multiple languages](../README.md#languages).
+STAC Browser supports [multiple languages](./localization.md).
 If you use more than one language, you likely want to also translate the phrases that you've added above (in the example `Data Access`, `Public` and `Private`, assuming that `Radiant Earth` is a name and doesn't need to be translated).
 All new phrases should be added to the [active languages](./options.md#supportedlocales).
 To add the phrases mentioned above you need to go through the folders in `src/locales` and in the folders of the active languages update the file `custom.json` as described in the section that describes [adding custom phrases](./localization.md#custom-phrases).
@@ -58,4 +62,69 @@ Below you can find an example of an updated `custom.json` for the German languag
     "Private": "Privat"
   }
 }
+```
+
+## Hiding fields
+
+If you have fields in your STAC metadata that you don't want to show in STAC Browser,
+you can customize this in the file [`fields.config.js`](../fields.config.js) as well.
+
+Some fields are hidden by default, you can check the source code for details:
+[ignored-metadata.js](../src/ignored-metadata.js).
+
+If you want to add or remove fields from the list of ignored fields,
+you can implement a function that updates the list.
+
+The function receives three parameters:
+
+- `object` (stac-js `StacObject` or `Object`): The entity for which the metadata is rendered.
+- `fields` (`Array.<string>`): The fields ignored by default.
+- `type` (`string`): The type of the entity, e.g. `CatalogLike`, `Item`, `Asset`, `Link`, `Provider`.
+
+The function has to return the (updated) fields to ignore in the metadata rendering as a `Array.<string>`.
+
+### Example
+
+```js
+const ignoreMetadata = (object, fields, type) => {
+  if (object.isCollection) {
+    // Show the proj:bbox and proj:geometry fields for Collections (these are ignored by default)
+    fields = fields.filter(field => !['proj:bbox', 'proj:geometry'].includes(field));
+  }
+  else if (type === 'Provider' && object.name === 'moreGeo GmbH') {
+    // Don't show the email field for the provider with name 'moreGeo GmbH'
+    fields.push('email');
+  }
+  if (object.isSTAC) {
+    // For all STAC entities (Item, Catalog, Collection) show the STAC version
+    fields = fields.filter(field => field !== 'stac_version');
+  }
+  return fields;
+}
+```
+
+## Customizing links
+
+STAC Browser shows the links of a STAC entity in a link list.
+Links that point to other STAC entities open within STAC Browser,
+while all other links open in a new browser tab.
+You can customize this behavior in the file [`relationTypes.config.js`](../relationTypes.config.js)
+based on the relation type (`rel`) of the links.
+
+Two customizations are available:
+
+- `stacNavigation`: A list of relation types that point to STAC entities.
+  Links with these relation types open within STAC Browser instead of opening the raw file in a new tab.
+  Use this if your catalogs use custom relation types to link to other STAC catalogs, collections, or items.
+- `hidden`: A list of relation types that should not appear in the link list at all.
+  Use this to hide links that are not useful for the people browsing your catalog.
+
+### Example
+
+```js
+// Links with the relation type `via` open within STAC Browser
+export const stacNavigation = ['via'];
+// Links with the relation type `service-desc` and `service-doc` are hidden,
+// effectively hiding the OpenAPI document links from the link list on the landing page.
+export const hidden = ['service-desc', 'service-doc'];
 ```
