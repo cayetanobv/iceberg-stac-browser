@@ -442,7 +442,8 @@ export default defineComponent({
         if (this.token) {
           await duckdb.setGcsToken(this.token);
         }
-        this.columns = await duckdb.withRouting(this.storage, () => duckdb.describe(this.scan));
+        const table = this.currentTable();
+        this.columns = await duckdb.withRouting(table.storage, () => duckdb.describe(table.scan));
         this.geometryInfo = duckdb.geometryColumn(this.columns, this.info.primaryGeometry);
         this.duck.ready = true;
       } catch (error) {
@@ -461,14 +462,19 @@ export default defineComponent({
         this.duck.starting = false;
       }
     },
+    currentTable() {
+      return Object.freeze({ storage: this.storage, scan: this.scan });
+    },
     async run(kind, fn) {
       this.busy = kind;
       this.queryError = null;
       this.status = null;
       try {
-        // Every query runs with this table's S3 routing, atomically.
+        // The routing and the scan come from one snapshot of the table, and
+        // the query runs with that routing, atomically.
+        const table = this.currentTable();
         const { withRouting } = await import('../utils/duckdb.js');
-        await withRouting(this.storage, fn);
+        await withRouting(table.storage, () => fn(table));
       } catch (error) {
         this.queryError = this.formatError(error);
       } finally {
@@ -487,13 +493,13 @@ export default defineComponent({
       });
     },
     loadPreview() {
-      return this.run('preview', async () => {
+      return this.run('preview', async table => {
         const duckdb = await import('../utils/duckdb.js');
         if (this.columns.length === 0) {
-          this.columns = await duckdb.describe(this.scan);
+          this.columns = await duckdb.describe(table.scan);
           this.geometryInfo = duckdb.geometryColumn(this.columns, this.info.primaryGeometry);
         }
-        this.results = await duckdb.previewRows(this.scan, this.columns, this.geometryInfo);
+        this.results = await duckdb.previewRows(table.scan, this.columns, this.geometryInfo);
       });
     },
     querySnapshot(snapshot) {
@@ -508,7 +514,7 @@ export default defineComponent({
       this.status = null;
     },
     loadMap() {
-      return this.run('map', async () => {
+      return this.run('map', async table => {
         const { sampleGeoJson, query } = await import('../utils/duckdb.js');
         const crs = this.geometryCrs;
         const needsReprojection = !LONLAT_CRS.includes(crs.toUpperCase());
@@ -519,7 +525,7 @@ export default defineComponent({
           try {
             const { rows } = await query(`
               SELECT ST_AsGeoJSON(ST_Transform(${this.geometryInfo.expr}, ${sqlString(crs)}, 'EPSG:4326', always_xy := true)) AS geojson
-              FROM ${this.scan} WHERE ${sqlIdent(this.geometryInfo.name)} IS NOT NULL LIMIT ${MAP_LIMIT}`);
+              FROM ${table.scan} WHERE ${sqlIdent(this.geometryInfo.name)} IS NOT NULL LIMIT ${MAP_LIMIT}`);
             geometries = rows.map(r => r.geojson && JSON.parse(r.geojson));
           } catch (error) {
             console.warn('[iceberg] ST_Transform failed, trying proj4', error);
@@ -527,12 +533,12 @@ export default defineComponent({
             if (!transform) {
               throw new Error(this.$t('iceberg.errors.crs', { crs }));
             }
-            const { rows } = await sampleGeoJson(this.scan, this.geometryInfo, MAP_LIMIT);
+            const { rows } = await sampleGeoJson(table.scan, this.geometryInfo, MAP_LIMIT);
             geometries = rows.map(r => r.geojson && reprojectGeometry(JSON.parse(r.geojson), transform));
           }
         }
         else {
-          const { rows } = await sampleGeoJson(this.scan, this.geometryInfo, MAP_LIMIT);
+          const { rows } = await sampleGeoJson(table.scan, this.geometryInfo, MAP_LIMIT);
           geometries = rows.map(r => r.geojson && JSON.parse(r.geojson));
         }
         const features = geometries.filter(Boolean).map((geometry, id) => ({ type: 'Feature', id, geometry, properties: {} }));
@@ -599,7 +605,7 @@ export default defineComponent({
       });
     },
     downloadTable() {
-      return this.run('download-table', async () => {
+      return this.run('download-table', async table => {
         const { exportToParquet } = await import('../utils/duckdb.js');
         this.status = this.$t('iceberg.download.progress');
         // portolake partitioning wrote helper columns the STAC schema leaves
@@ -609,7 +615,7 @@ export default defineComponent({
           ? this.columns.map(c => c.name).filter(n => !listed.has(n) && /^(bbox_|geohash_)/.test(n))
           : [];
         const select = derived.length > 0 ? `* EXCLUDE (${derived.map(sqlIdent).join(', ')})` : '*';
-        const buffer = await exportToParquet(`SELECT ${select} FROM ${this.scan}`, { geometryName: this.geometryInfo?.name });
+        const buffer = await exportToParquet(`SELECT ${select} FROM ${table.scan}`, { geometryName: this.geometryInfo?.name });
         this.saveFile(buffer, `${this.collection.id || 'iceberg'}.parquet`);
         this.status = null;
       });
