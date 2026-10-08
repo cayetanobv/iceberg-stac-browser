@@ -1,4 +1,31 @@
-# Portolan Browser <!-- omit in toc -->
+# Iceberg STAC Browser <!-- omit in toc -->
+
+A fork of [Portolan Browser](https://github.com/portolan-sdi/portolan-browser) that browses and queries
+[Apache Iceberg](https://iceberg.apache.org/) tables described with the
+[STAC Iceberg extension](https://github.com/portolan-sdi/stac-iceberg-extension) v1.1.0.
+
+Demo: <https://cayetanobv.github.io/iceberg-stac-browser/>
+
+## Iceberg tables <!-- omit in toc -->
+
+A collection that carries `iceberg:*` fields gets an **Apache Iceberg table** section:
+
+- **Connection**: catalog type, catalog URI, REST prefix, authorization, table id, metadata location,
+  format version, current snapshot and partition spec.
+- **Schema** and **Snapshots**: read from the table's `metadata.json`. A collection that pins a snapshot
+  the table no longer has is reported as stale.
+- **Code**: DuckDB, PyIceberg, BigQuery and DuckDB `ATTACH` snippets, where the collection has the fields
+  for them.
+- **Query**: [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview.html) runs in the browser on demand.
+  Preview rows, run SQL, query an earlier snapshot, draw geometries on a map and download GeoParquet 2.0.
+
+Iceberg v3 tables with native `geometry` columns and v2 tables with WKB geometry both work. The table is
+read from `iceberg:metadata_location`, so no catalog server is needed. A collection written against
+extension v1.0.0 still opens, with notices for the fields to update.
+
+---
+
+## Portolan Browser <!-- omit in toc -->
 
 Portolan Browser is a web viewer for [Portolan](https://www.portolan-sdi.org/) catalogs. Point it at a
 catalog and it draws the data on a map, renders the tables behind that data, and lets you walk the

@@ -10,7 +10,8 @@ jobs:
     permissions:
       contents: write
     env:
-      SB_pathPrefix: "/"
+      # Served at https://cayetanobv.github.io/iceberg-stac-browser/
+      SB_pathPrefix: "/iceberg-stac-browser/"
       SB_historyMode: "hash"
     steps:
       - uses: actions/checkout@v4
@@ -28,3 +29,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: dist
           exclude_assets: 'report.html'
+          user_name: 'Iceberg STAC Browser CI'
+          user_email: cayetano@carto.com
