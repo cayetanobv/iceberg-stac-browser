@@ -388,6 +388,9 @@ export default defineComponent({
     }
   },
   beforeUnmount() {
+    // A start still in flight must not route S3 requests for the collection
+    // that replaced this one.
+    this.unmounted = true;
     this.destroyMap();
   },
   methods: {
@@ -433,11 +436,13 @@ export default defineComponent({
         await this.metadataLoaded;
         await duckdb.initDuckDB();
         this.duck.version = await duckdb.engineVersion();
+        if (this.unmounted) {
+          return;
+        }
         if (this.token) {
           await duckdb.setGcsToken(this.token);
         }
-        // Always set it, so a routing left by another collection is dropped.
-        await duckdb.setS3Endpoint(this.storage);
+        await this.applyRouting(duckdb);
         this.columns = await duckdb.describe(this.scan);
         this.geometryInfo = duckdb.geometryColumn(this.columns, this.info.primaryGeometry);
         this.duck.ready = true;
@@ -457,11 +462,22 @@ export default defineComponent({
         this.duck.starting = false;
       }
     },
+    /**
+     * Route s3:// paths for this table and no other. The routing is shared by
+     * the whole DuckDB session, so it is set again before every query: what
+     * applies is always the table on screen, whatever ran before.
+     */
+    async applyRouting(duckdb) {
+      if (!this.unmounted) {
+        await duckdb.setS3Endpoint(this.storage);
+      }
+    },
     async run(kind, fn) {
       this.busy = kind;
       this.queryError = null;
       this.status = null;
       try {
+        await this.applyRouting(await import('../utils/duckdb.js'));
         await fn();
       } catch (error) {
         this.queryError = this.formatError(error);
