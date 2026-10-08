@@ -1,4 +1,5 @@
 import { ignoreMetadata } from '../fields.config.js';
+import { ICEBERG_FIELDS } from './utils/iceberg.js';
 
 const ignoredFields = {
   CatalogLike: [
@@ -35,7 +36,9 @@ const ignoredFields = {
     // Special handling for auth
     'auth:schemes',
     // Special handling for the STAC Browser config
-    'stac_browser'
+    'stac_browser',
+    // Rendered by the Iceberg table section
+    ...ICEBERG_FIELDS
   ],
   Item: [
     'description',

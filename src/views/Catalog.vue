@@ -44,6 +44,7 @@
         <Assets v-if="hasAssets" :assets="assets" :shown="selectedReferences" @show-asset="showAsset" />
         <Assets v-if="hasItemAssets && !hasItems" :assets="itemAssets" :definition="true" />
         <ParquetViewer v-if="hasAssets" :assets="assets" @zoom-to-bbox="zoomToBbox" @highlight-bbox="highlightBbox" />
+        <IcebergTable v-if="hasIceberg" :collection="data" />
         <Providers v-if="providers" :providers="providers" />
         <MetadataGroups class="mb-4" :type="data.type" :data="data" :ignoreFields="ignoredMetadataFields" />
         <LinkList v-if="linkPosition === 'right'" :title="$t('additionalResources')" :links="additionalLinks" />
@@ -95,6 +96,7 @@ import DeprecationMixin from '../components/DeprecationMixin.js';
 import { BCollapse } from 'bootstrap-vue-next';
 import { getIgnoredFields } from '../ignored-metadata.js';
 import { fetchQueryablesForLink, fetchSortablesForLink } from '../store/utils';
+import { hasIcebergMetadata } from '../utils/iceberg.js';
 
 export default defineComponent({
   name: "Catalog",
@@ -116,7 +118,8 @@ export default defineComponent({
     Providers: defineAsyncComponent(() => import('../components/Providers.vue')),
     ReadMore,
     Thumbnails: defineAsyncComponent(() => import('../components/Thumbnails.vue')),
-    ParquetViewer: defineAsyncComponent(() => import('../components/ParquetViewer.vue'))
+    ParquetViewer: defineAsyncComponent(() => import('../components/ParquetViewer.vue')),
+    IcebergTable: defineAsyncComponent(() => import('../components/IcebergTable.vue'))
   },
   mixins: [
     ShowAssetLinkMixin,
@@ -137,6 +140,9 @@ export default defineComponent({
     ...mapGetters(['catalogs', 'collectionLink', 'isApiChildrenLoading', 'isCollection', 'items', 'getApiItemsLoading', 'parentLink', 'rootLink']),
     ignoredMetadataFields() {
       return getIgnoredFields(this.data, 'CatalogLike');
+    },
+    hasIceberg() {
+      return this.isCollection && hasIcebergMetadata(this.data);
     },
     cssStacType() {
       if (hasText(this.data?.type)) {
