@@ -535,6 +535,7 @@
       "id": "Snapshot",
       "operation": "Operation",
       "records": "Rows",
+      "hidden": "Hidden by deletes",
       "files": "Files",
       "current": "table current",
       "pinned": "collection",
@@ -579,7 +580,7 @@
       "formatVersion": "The collection states format version {stac}, the table is version {table}.",
       "geography": "The table has a geography column. DuckDB cannot read the geography type yet.",
       "quotedCrs": "A geometry type quotes its CRS, as PyIceberg 0.12 writes it. DuckDB and Java readers then fail on the CRS.",
-      "rowCount": "table:row_count is {stac}, the current snapshot has {table} rows.",
+      "rowCount": "table:row_count is {stac}, the current snapshot has {table} live rows ({physical} in its data files, {deleted} hidden by deletes).",
       "managedNoLocation": "The table lives in a {type} catalog and the collection gives no metadata file. Use the connection details to open it in a query engine.",
       "notQueryable": "The collection gives no metadata file to read the table from."
     },

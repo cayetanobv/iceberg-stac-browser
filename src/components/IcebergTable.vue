@@ -74,6 +74,7 @@
                     <th>{{ $t('iceberg.snapshots.id') }}</th>
                     <th>{{ $t('iceberg.snapshots.operation') }}</th>
                     <th class="text-end">{{ $t('iceberg.snapshots.records') }}</th>
+                    <th class="text-end">{{ $t('iceberg.snapshots.hidden') }}</th>
                     <th class="text-end">{{ $t('iceberg.snapshots.files') }}</th>
                     <th />
                   </tr>
@@ -87,7 +88,8 @@
                       <b-badge v-if="snap.id === info.currentSnapshotId" variant="info" class="ms-1">{{ $t('iceberg.snapshots.pinned') }}</b-badge>
                     </td>
                     <td>{{ snap.operation }}</td>
-                    <td class="text-end">{{ snap.totalRecords !== null ? snap.totalRecords.toLocaleString() : '' }}</td>
+                    <td class="text-end">{{ snap.liveRecords !== null ? snap.liveRecords.toLocaleString() : (snap.totalRecords !== null ? snap.totalRecords.toLocaleString() : '') }}</td>
+                    <td class="text-end">{{ snap.positionDeletes > 0 ? snap.positionDeletes.toLocaleString() : '' }}</td>
                     <td class="text-end">{{ snap.totalFiles !== null ? snap.totalFiles.toLocaleString() : '' }}</td>
                     <td class="text-end">
                       <b-button v-if="info.queryable" size="sm" variant="outline-primary" @click="querySnapshot(snap)">
@@ -273,7 +275,7 @@ export default defineComponent({
         warn(code);
       }
       for (const issue of this.issues) {
-        warn(issue.code, { stac: issue.stac, table: issue.table });
+        warn(issue.code, { stac: issue.stac, table: issue.table, physical: issue.physical, deleted: issue.deleted });
       }
       if (!this.info.queryable) {
         warn(this.info.managed ? 'managedNoLocation' : 'notQueryable', { type: this.info.catalogType }, 'info');
