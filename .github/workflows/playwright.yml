@@ -12,7 +12,11 @@ on:
 jobs:
   test:
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04 in November 2026, and Playwright
+    # 1.57 ships no Chromium build for it ("Playwright does not support
+    # chromium on ubuntu26.04-x64"). Lift the pin with a Playwright release
+    # that lists 26.04.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
