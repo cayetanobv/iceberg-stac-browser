@@ -244,6 +244,61 @@ describe('table metadata', () => {
     const info = getIcebergInfo({ ...portolanCollection(), 'iceberg:current_snapshot_id': '4358210771845678000' })
     expect(compareWithTable(info, summary).map(i => i.code)).toEqual(['snapshotBehind'])
   })
+
+  // A merge-on-read writer (DuckDB) replaces rows with a deletion vector and a new
+  // data file. The summary then counts the physical rows of every data file in
+  // total-records, and the rows the vectors hide in total-position-deletes.
+  const mergeOnRead = (summary) => `{
+    "format-version": 3,
+    "table-uuid": "u",
+    "location": "https://x/t",
+    "current-schema-id": 0,
+    "schemas": [{"schema-id": 0, "type": "struct", "fields": [{"id": 1, "name": "id", "required": false, "type": "long"}]}],
+    "default-spec-id": 0,
+    "partition-specs": [{"spec-id": 0, "fields": []}],
+    "current-snapshot-id": 4358210771845678999,
+    "snapshots": [{"snapshot-id": 4358210771845678999, "timestamp-ms": 2000, "summary": ${JSON.stringify(summary)}}]
+  }`
+
+  it('counts the live rows of a snapshot net of its deletion vectors', () => {
+    const summary = summarizeTableMetadata(parseTableMetadata(mergeOnRead({
+      operation: 'append', 'total-records': '1002', 'total-position-deletes': '501', 'total-delete-files': '1', 'total-data-files': '2',
+    })))
+    expect(summary.snapshots[0].totalRecords).toBe(1002)
+    expect(summary.snapshots[0].positionDeletes).toBe(501)
+    expect(summary.snapshots[0].liveRecords).toBe(501)
+  })
+
+  it('reads a snapshot without delete counts as having no hidden rows', () => {
+    const summary = summarizeTableMetadata(parseTableMetadata(text))
+    expect(summary.snapshots[0].positionDeletes).toBe(0)
+    expect(summary.snapshots[0].liveRecords).toBe(1012)
+  })
+
+  it('leaves the live count unknown under equality deletes', () => {
+    const summary = summarizeTableMetadata(parseTableMetadata(mergeOnRead({
+      operation: 'append', 'total-records': '1002', 'total-equality-deletes': '3',
+    })))
+    expect(summary.snapshots[0].liveRecords).toBe(null)
+  })
+
+  it('compares table:row_count with the live rows, not the physical rows', () => {
+    const summary = summarizeTableMetadata(parseTableMetadata(mergeOnRead({
+      operation: 'append', 'total-records': '1002', 'total-position-deletes': '501',
+    })))
+    const info = getIcebergInfo({ ...portolanCollection(), 'iceberg:current_snapshot_id': '4358210771845678999', 'table:row_count': 501 })
+    expect(compareWithTable(info, summary)).toEqual([])
+    const stale = getIcebergInfo({ ...portolanCollection(), 'iceberg:current_snapshot_id': '4358210771845678999', 'table:row_count': 1002 })
+    expect(compareWithTable(stale, summary)).toEqual([{ code: 'rowCount', stac: 1002, table: 501, physical: 1002, deleted: 501 }])
+  })
+
+  it('raises no row count issue when the live count is unknown', () => {
+    const summary = summarizeTableMetadata(parseTableMetadata(mergeOnRead({
+      operation: 'append', 'total-records': '1002', 'total-equality-deletes': '3',
+    })))
+    const info = getIcebergInfo({ ...portolanCollection(), 'iceberg:current_snapshot_id': '4358210771845678999', 'table:row_count': 999 })
+    expect(compareWithTable(info, summary)).toEqual([])
+  })
 })
 
 describe('parseGeoType', () => {

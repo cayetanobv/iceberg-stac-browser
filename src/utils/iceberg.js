@@ -336,17 +336,32 @@ export function summarizeTableMetadata(metadata) {
   const partitionSpec = Array.isArray(spec?.fields) ? spec.fields.map(normalizePartitionField).filter(Boolean) : [];
 
   const currentSnapshotId = metadata['current-snapshot-id'] != null ? String(metadata['current-snapshot-id']) : null;
-  const snapshots = (Array.isArray(metadata.snapshots) ? metadata.snapshots : []).map(s => ({
-    id: String(s['snapshot-id']),
-    parentId: s['parent-snapshot-id'] != null ? String(s['parent-snapshot-id']) : null,
-    sequenceNumber: s['sequence-number'] ?? null,
-    timestamp: Number.isFinite(s['timestamp-ms']) ? new Date(s['timestamp-ms']) : null,
-    operation: s.summary?.operation || null,
-    totalRecords: s.summary?.['total-records'] != null ? Number(s.summary['total-records']) : null,
-    totalFiles: s.summary?.['total-data-files'] != null ? Number(s.summary['total-data-files']) : null,
-    addedRecords: s.summary?.['added-records'] != null ? Number(s.summary['added-records']) : null,
-    current: currentSnapshotId !== null && String(s['snapshot-id']) === currentSnapshotId,
-  })).sort((a, b) => (b.timestamp?.getTime() ?? 0) - (a.timestamp?.getTime() ?? 0));
+  const snapshots = (Array.isArray(metadata.snapshots) ? metadata.snapshots : []).map(s => {
+    const count = (key) => (s.summary?.[key] != null ? Number(s.summary[key]) : null);
+    const totalRecords = count('total-records');
+    // A merge-on-read writer, DuckDB among them, replaces rows with a deletion
+    // vector and a new data file. `total-records` then counts the physical rows
+    // of every data file, and `total-position-deletes` the rows the vectors
+    // hide. A vector marks each row once, so the live count is the difference.
+    // An equality delete hides rows by value, and the summary cannot say how
+    // many, so the live count is unknown under one.
+    const positionDeletes = count('total-position-deletes') ?? 0;
+    const equalityDeletes = count('total-equality-deletes') ?? 0;
+    const liveRecords = totalRecords !== null && equalityDeletes === 0 ? totalRecords - positionDeletes : null;
+    return {
+      id: String(s['snapshot-id']),
+      parentId: s['parent-snapshot-id'] != null ? String(s['parent-snapshot-id']) : null,
+      sequenceNumber: s['sequence-number'] ?? null,
+      timestamp: Number.isFinite(s['timestamp-ms']) ? new Date(s['timestamp-ms']) : null,
+      operation: s.summary?.operation || null,
+      totalRecords,
+      positionDeletes,
+      liveRecords,
+      totalFiles: count('total-data-files'),
+      addedRecords: count('added-records'),
+      current: currentSnapshotId !== null && String(s['snapshot-id']) === currentSnapshotId,
+    };
+  }).sort((a, b) => (b.timestamp?.getTime() ?? 0) - (a.timestamp?.getTime() ?? 0));
 
   return {
     formatVersion: Number.isInteger(metadata['format-version']) ? metadata['format-version'] : null,
@@ -407,9 +422,17 @@ export function compareWithTable(info, summary) {
     issues.push({ code: 'quotedCrs' });
   }
   if (info.rowCount !== null) {
+    // table:row_count is what a reader sees, so it compares with the live
+    // rows of the snapshot, not with the physical rows of its data files.
     const current = summary.snapshots.find(s => s.current);
-    if (current?.totalRecords != null && current.totalRecords !== info.rowCount) {
-      issues.push({ code: 'rowCount', stac: info.rowCount, table: current.totalRecords });
+    if (current?.liveRecords != null && current.liveRecords !== info.rowCount) {
+      issues.push({
+        code: 'rowCount',
+        stac: info.rowCount,
+        table: current.liveRecords,
+        physical: current.totalRecords,
+        deleted: current.positionDeletes,
+      });
     }
   }
   return issues;
